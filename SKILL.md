@@ -1406,6 +1406,37 @@ Lessons: <what to remember next session>
 
 ---
 
+## 6-Stage Deep Thinking Pipeline (New)
+
+> **مرجع:** راجع `DEEP_THINKING_SKILL.md` و `STAGES_PROMPTS.md` للتفاصيل الكاملة.
+
+السرب الآن يعمل عبر **6 مراحل متسلسلة** — لا تقفز مراحل:
+
+| المرحلة | الاسم | الهدف | المخرجات |
+|----------|-------|-------|----------|
+| **1** | **التخطيط الاستراتيجي العميق** | فهم المهمة من كل الزوايا قبل التنفيذ | `StrategicPlan.md` |
+| **2** | **خطة تنفيذ Decision-Complete** | خطة لا تترك أي قرار للمنفذ | `ImplementationPlan.md` |
+| **3** | **تنفيذ بأعلى كفاءة + Fallback Chain** | تنفيذ متوازي + Fallback ذكي | `WorkerOutputs/`, `Logs/`, `Artifacts/` |
+| **4** | **Auto-Verdict Pipeline (12 خطوة)** | تحقق 100% — PASS/REDO/FORCE | `VerificationReport.md` |
+| **5** | **تحسين مستمر** | Refactor، Performance، Security، Docs | `ImprovementLog.md`، `TechnicalDebtLog.md` |
+| **6** | **مراجعة نهائية + Handoff** | Production Readiness + Decision Log | `FinalReport.md`، `HandoffPackage/` |
+
+**قواعد صارمة:**
+- المراحل **تسلسلية** — لا تقفز
+- `Analysis Channel` للتفكير الخفي (Hidden CoT)
+- `Python Tool` للحسابات الدقيقة
+- `Web Search` إلزامي للحقائق الزمنية (>10% احتمال تغير)
+- `Citations` إلزامية لكل ادعاء واقعي
+- `Verification Step` إلزامي لكل مهمة
+- `Decision Log` تراكمي عبر كل المراحل
+- `Compliance Checklist` قبل كل انتقال مرحلة
+
+**ملفات المرجع:**
+- `DEEP_THINKING_SKILL.md` — مواصفات النظام الكاملة
+- `STAGES_PROMPTS.md` — برومبتات كل مرحلة للنسخ في البرومبت الرئيسي
+
+---
+
 ## Skill Sources
 
 | Source | Skills | Notes |
