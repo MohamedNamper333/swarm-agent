@@ -1,0 +1,6 @@
+*.orig
+*.log
+session-*.md
+node_modules/
+.env
+.DS_Store
