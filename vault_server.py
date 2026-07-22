@@ -87,8 +87,11 @@ class VaultHandler(BaseHTTPRequestHandler):
                               "type": "file", "size": s.st_size, "ctime": int(s.st_ctime * 1000),
                               "mtime": int(s.st_mtime * 1000)})
             elif f.is_dir():
+                s = f.stat()
                 files.append({"path": str(f.relative_to(VAULT_PATH)) + "/",
-                              "basename": f.name, "type": "directory", "size": 0})
+                              "basename": f.name, "type": "directory", "size": 0,
+                              "ctime": int(s.st_ctime * 1000),
+                              "mtime": int(s.st_mtime * 1000)})
         return files
 
     def _all_tags(self):
@@ -103,7 +106,7 @@ class VaultHandler(BaseHTTPRequestHandler):
                 pass
         return [{"name": t, "count": c} for t, c in sorted(counts.items())]
 
-    def _search(self, query, context_length=100):
+    def _search(self, query, context_length=100, mcp_format=False):
         results = []
         q = query.lower()
         for f in VAULT_PATH.rglob("*.md"):
@@ -126,9 +129,17 @@ class VaultHandler(BaseHTTPRequestHandler):
                             idx = ctx.lower().find(q)
                             s = max(0, idx - context_length // 2)
                             ctx = ctx[s:s + context_length]
-                        matches.append({"line": i + 1, "text": line.strip(), "context": ctx})
-                results.append({"filename": f.name, "path": rel, "matches": matches, "score": len(matches)})
-        results.sort(key=lambda x: x["score"], reverse=True)
+                        if mcp_format:
+                            matches.append({"match": {"filename": f.name, "path": rel, "line": i + 1, "text": line.strip(), "context": ctx}})
+                        else:
+                            matches.append({"line": i + 1, "text": line.strip(), "context": ctx})
+                if mcp_format:
+                    results.append({"matches": matches})
+                else:
+                    results.append({"filename": f.name, "path": rel, "matches": matches, "score": len(matches)})
+        results.sort(key=lambda x: x.get("score", len(x.get("matches", []))), reverse=True)
+        if mcp_format:
+            return {"hits": results}
         return results
 
     def _resolve_note_content(self, full_path, accept="text/markdown"):
@@ -250,7 +261,7 @@ class VaultHandler(BaseHTTPRequestHandler):
         # List vault root
         if path in ("/vault/", "/vault"):
             files = self._vault_files()
-            return self._json(200, files)
+            return self._json(200, {"files": files})
 
         # Read file / list directory
         if path.startswith("/vault/"):
@@ -259,7 +270,7 @@ class VaultHandler(BaseHTTPRequestHandler):
             if not full.exists():
                 return self._json(404, {"error": f"Not found: {rel}", "reason": "note_missing"})
             if full.is_dir():
-                return self._json(200, self._vault_files(rel))
+                return self._json(200, {"files": self._vault_files(rel)})
             # Note JSON format
             if "application/vnd.olrapi.note+json" in accept:
                 return self._json(200, self._resolve_note_content(full, accept))
@@ -293,7 +304,16 @@ class VaultHandler(BaseHTTPRequestHandler):
             q = qs.get("query", qs.get("q", [""]))[0]
             if not q:
                 return self._json(400, {"error": "Missing ?query="})
-            results = self._search(q)
+            results = self._search(q, mcp_format=True)
+            return self._json(200, results)
+
+        # Simple Search GET
+        if path in ("/search/simple/", "/search/simple"):
+            q = qs.get("query", qs.get("q", [""]))[0]
+            cl = int(qs.get("contextLength", [100])[0])
+            if not q:
+                return self._json(400, {"error": "Missing ?query="})
+            results = self._search(q, cl, mcp_format=True)
             return self._json(200, results)
 
         # Open
@@ -328,7 +348,7 @@ class VaultHandler(BaseHTTPRequestHandler):
                     pass
             if not q:
                 return self._json(400, {"error": "Missing query"})
-            return self._json(200, self._search(q, cl))
+            return self._json(200, self._search(q, cl, mcp_format=True))
 
         # Advanced search POST (JSON Logic)
         if path in ("/search/", "/search"):
@@ -357,7 +377,7 @@ class VaultHandler(BaseHTTPRequestHandler):
                 q = qs.get("query", qs.get("q", [""]))[0]
             if not q:
                 return self._json(400, {"error": "Missing query"})
-            return self._json(200, self._search(q))
+            return self._json(200, self._search(q, mcp_format=True))
 
         # Execute command
         if path.startswith("/commands/"):
