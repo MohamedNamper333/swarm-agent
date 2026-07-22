@@ -1,0 +1,10 @@
+project_id: swarm-task-manager
+current_stage: 6
+task_stack: []
+artifacts:
+  - strategic_plan.md
+  - implementation_plan.md
+  - execution_log.jsonl
+  - quality_report.md
+  - improvement_report.md
+  - handoff_package.md

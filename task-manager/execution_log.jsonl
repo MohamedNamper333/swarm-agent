@@ -1,0 +1,2 @@
+{"stage": 3, "event": "test_complete", "passed": 15, "failed": 0, "timestamp": "2025-07-22T00:05:00Z"}
+{"stage": 3, "event": "cli_verified", "commands": ["add", "list", "complete", "delete"], "timestamp": "2025-07-22T00:05:30Z"}
