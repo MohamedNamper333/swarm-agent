@@ -1,8 +1,9 @@
-__pycache__/
-*.pyc
-*.pyo
-.opencode/
-*.bak
 *.orig
-*.db
-.pytest_cache/
+*.log
+session-*.md
+node_modules/
+.env
+.DS_Store
+.opencode/logs/
+logs/
+*.bak.*
