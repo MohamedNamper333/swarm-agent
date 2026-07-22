@@ -307,19 +307,6 @@
         "@a-bonus/google-docs-mcp"
       ],
       "enabled": true
-    },
-    "obsidian": {
-      "type": "local",
-      "command": [
-        "npx",
-        "-y",
-        "obsidian-mcp-server"
-      ],
-      "environment": {
-        "OBSIDIAN_API_KEY": "swarm-evolution-2025",
-        "OBSIDIAN_API_URL": "http://localhost:27123"
-      },
-      "enabled": true
     }
   },
   "permission": {
