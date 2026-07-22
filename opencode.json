@@ -270,7 +270,7 @@
   },
   "skills": {
     "paths": [
-      "~/.config/opencode/swarm-agent/SKILL.md"
+      "~/.config/opencode/skills"
     ]
   },
   "plugin": [

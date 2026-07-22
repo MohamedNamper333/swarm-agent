@@ -36,9 +36,14 @@ opencode --model vision-max "<1M context task>"
 
 The coordinator triages every task:
 
-1. **Simple** (1-line fix, direct question) → single worker, no swarm
-2. **Medium** (2-4 steps) → 3-4 workers, divide-conquer
-3. **Complex** (5+ steps, multi-domain) → full 9-worker stepwise-auto with auto-verdict
+1. **Simple** (1-line fix, direct question) → single worker, no swarm  
+   Pipeline: LITE (3 stages: Plan → Execute → Verify)
+
+2. **Medium** (2-4 steps, focused domain) → 3-4 workers, divide-conquer  
+   Pipeline: STANDARD (4 stages: Plan → Execute → Quality Review → Auto-Verdict)
+
+3. **Complex** (5+ steps, multi-domain) → full 9-worker stepwise-auto with auto-verdict  
+   Pipeline: FULL (6 stages: Deep Plan → Decision-Complete Spec → Execute → 12-Step Auto-Verdict → Improve → Handoff)
 
 ## Auto-Verdict Pipeline
 
