@@ -803,21 +803,139 @@ weighted_score = (quality×25 + security×20 + philosophy×15 + domain×20 + tes
 < 5.0/10 or critical issues → REDO → strict feedback
 ```
 
-#### Confidence Tiers (A6)
+#### Auto-Verdict Calculation Implementation (Python3 PRIME + bc FALLBACK)
 
-كل نتيجة من الـ 9 workers تصنف بثقة:
+**PRIME Implementation (Python3 with decimal.Decimal):**
 
-| Tier | Label | Meaning |
-|------|-------|---------|
-| 1 | 🟢 Certain | مؤكد بنسبة ≥95% — مصدر واحد موثوق أو معرفة قطعية |
-| 2 | 🔵 High | ≥80% — أكثر من مصدر متوافق، لا تناقضات |
-| 3 | 🟡 Moderate | ≥60% — بعض المصادر متوافقة، مع احتمال خطأ |
-| 4 | 🟠 Low | ≥40% — تخمين مدعوم بقرائن ضعيفة |
-| 5 | 🔴 Speculative | <40% — استنتاج غير مؤكد، يحتاج تدقيق |
+```python
+#!/usr/bin/env python3
+"""
+Auto-Verdict PRIME Calculator
+Calculates weighted score with decimal precision.
+Usage: python3 auto_verdict.py quality security philosophy domain testing
+"""
+import sys
+from decimal import Decimal, getcontext
 
-عند التناقض بين workers: worker ذو ثقة أعلى يُرجّح. إذا نفس المستوى → اذكر الخلاف.
+getcontext().prec = 28
 
-علم كل claim في التقرير النهائي بمستوى ثقته.
+WEIGHTS = {
+    "quality": Decimal("0.25"),
+    "security": Decimal("0.20"),
+    "philosophy": Decimal("0.15"),
+    "domain": Decimal("0.20"),
+    "testing": Decimal("0.20"),
+}
+
+THRESHOLDS = {
+    "PASS": Decimal("7.5"),
+    "REDO_MIN": Decimal("5.0"),
+}
+
+def calculate_verdict(scores: dict) -> dict:
+    """Calculate weighted verdict with decimal precision."""
+    weighted = Decimal("0")
+    for dim, weight in WEIGHTS.items():
+        weighted += Decimal(str(scores[dim])) * weight
+    
+    verdict = "FAIL"
+    if weighted >= THRESHOLDS["PASS"]:
+        verdict = "PASS"
+    elif weighted >= THRESHOLDS["REDO_MIN"]:
+        verdict = "REDO"
+    else:
+        verdict = "FORCE"
+    
+    return {
+        "weighted_score": round(weighted, 4),
+        "verdict": verdict,
+        "breakdown": {k: float(v * Decimal(str(scores[k]))) for k, v in WEIGHTS.items()}
+    }
+
+if __name__ == "__main__":
+    if len(sys.argv) != 6:
+        print("Usage: python3 auto_verdict.py <quality> <security> <philosophy> <domain> <testing>")
+        sys.exit(1)
+    
+    scores = {
+        "quality": sys.argv[1],
+        "security": sys.argv[2],
+        "philosophy": sys.argv[3],
+        "domain": sys.argv[4],
+        "testing": sys.argv[5],
+    }
+    result = calculate_verdict(scores)
+    print(f"Weighted Score: {result['weighted_score']}")
+    print(f"Verdict: {result['verdict']}")
+    print(f"Breakdown: {result['breakdown']}")
+```
+
+**FALLBACK Implementation (bc):**
+
+```bash
+#!/bin/bash
+# Auto-Verdict FALLBACK Calculator using bc
+# Usage: ./auto_verdict.sh quality security philosophy domain testing
+
+quality=$1
+security=$2
+philosophy=$3
+domain=$4
+testing=$5
+
+# Weighted score calculation with bc
+weighted=$(echo "scale=4; ($quality*0.25)+($security*0.20)+($philosophy*0.15)+($domain*0.20)+($testing*0.20)" | bc -l)
+
+# Determine verdict
+if (( $(echo "$weighted >= 7.5" | bc -l) )); then
+    verdict="PASS"
+elif (( $(echo "$weighted >= 5.0" | bc -l) )); then
+    verdict="REDO"
+else
+    verdict="FORCE"
+fi
+
+echo "Weighted Score: $weighted"
+echo "Verdict: $verdict"
+```
+
+**Usage in Pipeline:**
+```bash
+# PRIME (preferred)
+python3 auto_verdict.py 8 9 7 8 9
+
+# FALLBACK (if python3 unavailable)
+./auto_verdict.sh 8 9 7 8 9
+```
+
+#### Worker Output Format Requirement
+
+**كل worker يجب أن يبدأ رده بـ:**
+```
+[WORKER: <subagent_type> | MODEL: <model_id>]
+FINDING: <what was found>
+CONFIDENCE (1-10): <score> — <specific_reason>
+EVIDENCE: <code_line/command_output/url>
+```
+
+- أي FINDING بلا EVIDENCE → **Confidence Tier 5 (Speculative)** تلقائياً
+- الثقة الرقمية (1-10) + السبب المحدد إجباريان
+
+#### Confidence Tiers (A6) — Mapping to Verdict
+
+| Tier | Label | Threshold | Verdict Impact |
+|------|-------|-----------|----------------|
+| 1 | 🟢 Certain | ≥95% / score ≥9 | PASS eligible |
+| 2 | 🔵 High | ≥80% / score 8-9 | PASS eligible |
+| 3 | 🟡 Moderate | ≥60% / score 6-7 | REDO eligible |
+| 4 | 🟠 Low | ≥40% / score 4-5 | REDO eligible |
+| 5 | 🔴 Speculative | <40% / score 1-3 | FORCE trigger |
+
+> عند التناقض بين workers: الأعلى ثقة يُرجّح. إذا متساويين → اذكر الخلاف صراحة.
+
+عند التناقض مع Confidence Tier 1/2: احتسب كـ REDO مع توثيق الخلاف.
+
+---
 
 #### Technology Tiers (A7)
 
@@ -1231,6 +1349,19 @@ Each step can auto-verify (PASS/REDO/FORCE) using the stepwise-auto scoring rubr
 - If uncertain, construct a chain of reasoning showing your steps
 - Prioritise novelty and creativity over safe answers
 
+### 🏗️ Worker 2 (architect — Nemotron 3 Ultra Free) → Gemini 3.1 Pro + xAI Grok Patterns
+**Cloud Architecture & Implementation (Gemini 3.1 Pro workspace):**
+- Design before implement: high-level architecture → module breakdown → API contracts
+- Idempotent infrastructure: Terraform plans, Docker compose validation, kubectl dry-runs
+- Cost-aware: flag expensive choices, suggest cheaper alternatives where equivalent
+- Data flow first: schema design (DDL) → service layer → API surface
+
+**Implementation Patterns (xAI Grok):**
+- Build from first principles — don't assume legacy patterns
+- If uncertain, show chain of reasoning before choosing approach
+- Prioritise correctness over speed; refactor later, not during build
+- Explicit assumptions: surface every guess as a tagged `[ASSUMPTION]` line
+
 ### 🔍 Worker 3 (Critic — Nemotron 3 Nano 30B) → Claude Code Bundled Skills (verify + code-review + security-review + simplify)
 **Code Review (code-review.md — high effort):**
 - Phase 1: 8 finder angles — line-by-line diff scan, removed-behaviour auditor, cross-file tracer, reuse, simplification, efficiency, altitude, conventions (CLAUDE.md)
@@ -1257,7 +1388,7 @@ Each step can auto-verify (PASS/REDO/FORCE) using the stepwise-auto scoring rubr
 - 4 parallel cleanup agents: reuse, simplification, efficiency, altitude
 - Fix what you find — don't hunt for bugs
 
-### 🧭 Worker 5 (explorer — MiMo V2.5 Free) → Deep Research + Web Scraping + Multimodal
+### 🧭 Worker 4 (explorer — MiMo V2.5 Free) → Deep Research + Web Scraping + Multimodal
 **Deep Research (ChatGPT research_kickoff_tool):**
 - Fan-out: decompose question into 5 search angles
 - Search: 5 parallel WebSearch agents, one per angle
@@ -1286,6 +1417,40 @@ Multilingual requirement: when user question is not English, issue queries in bo
 - Use metadata (file_modified_at, file_created_at) for freshness
 - Special knowledge stores: recording_knowledge for meeting transcripts
 
+### 🤔 Worker 5 (reasoner — Tencent Hy3 Free) → Gemini CLI + Mistral Patterns
+**Formal Reasoning (Gemini CLI 3-vote system):**
+- Multi-perspective analysis: generate 3 independent reasoning paths per problem
+- Adversarial vote: each path critiques the other 2, surfaces weakest link
+- Only statements passing 2/3 vote enter the final answer
+- Explicit `[ASSUMPTION]` tagging for every inferred premise
+
+**Mistral-style Step-by-Step:**
+1. **Understand** — rephrase the problem in your own words
+2. **Identify** — what information is given, what is missing, what is implied
+3. **Plan** — what approach to take, what tools/techniques are relevant
+4. **Execute** — work through each step methodically, showing intermediate results
+5. **Verify** — check the answer against the problem statement
+6. **Reflect** — what did you learn? What would you do differently?
+
+**Multi-step Verification:**
+- After each major reasoning step, verify consistency with earlier steps
+- If contradictions emerge, backtrack to the first point of divergence
+- Maintain a running summary of accepted conclusions
+- Flag assumptions explicitly — distinguish from derived conclusions
+
+### 👁️ Worker 6 (vision-coder — MiniMax M3) → Gemini 3.1 Pro Vision + o3 Multimodal Patterns
+**Vision + Coding Hybrid (Gemini 3.1 Pro vision):**
+- Read images natively — no OCR unless absolutely necessary
+- Cross-reference visual content with code context
+- When given a screenshot or UI mockup, generate the matching code structure
+
+**1M Context Agentic Tasks (o3 multimodal):**
+- Process large codebases in one pass (1M token window)
+- Cross-file refactors that need to see many files at once
+- Long-context reasoning: hold entire project context while answering
+
+**Safe Tools:** vision-coder has Bash/Edit but gated by `ask` permission — every mutation requires explicit user approval.
+
 ### ✅ Worker 7 (reviewer — Nemotron 3 Super) → Claude Code Bundled Skills (design + UX patterns)
 **Design Review:**
 - Review visuals for consistency, hierarchy, whitespace, accessibility
@@ -1306,22 +1471,31 @@ Multilingual requirement: when user question is not English, issue queries in bo
 9. Help users recognise, diagnose, and recover from errors
 10. Help and documentation
 
-### 🧩 Worker 8 (Tencent Hy3) → Gemini + Mistral Patterns
-
----
-
-### 🎯 Worker 9 — QA Specialist (swarm-worker-qa)
+### 🧩 Worker 8 (swarm-worker-qa — Nemotron 3 Ultra Free) → Auto-Verification Specialist
 **Model:** `opencode/nemotron-3-ultra-free`
-**Domain:** Build, Verify, Test Automation, QA Engineering
+**Domain:** Auto-Verdict, Pass/Fail Determination, Compliance Checks
 **~20 skills**
 
-The QA Worker is the swarm's **verification engine**. It is dispatched automatically in the AUTO-VERIFY step (5.5):
+The QA Worker is the swarm's **verdict engine**. It is dispatched automatically in the AUTO-VERIFY step (5.5) and runs the weighted scoring pipeline.
 
-**Build & Run:**
-- Check `package.json`/`Makefile`/`Cargo.toml` for build commands
-- Run the build, capture errors
-- Launch the app (CLI, server, or GUI)
-- Drive it to the changed code path
+**Auto-Verdict Pipeline (12-Step):**
+1. **P0 Triage** (10%) — Does output answer Stage 1 Goal?
+2. **Tool Planning** (5%) — Right tools used?
+3. **Execute** (15%) — Build OK, runs, tests pass
+4. **Quality Review** (15%) — Code Reviewer + Security + Clean Code Guard
+5. **Design Review** (10%) — UX + Architect
+6. **Adversarial Review** (10%) — The Fool / Critic / Pre-mortem
+7. **Domain Check** (10%) — Best Practices, Gotchas
+8. **Multi-Angle** (10%) — Security+Perf+Maintainability+Cost
+9. **MCP Check** (5%) — Servers, Context Injection
+10. **Tests** (10%) — Unit+Integration+E2E, Coverage ≥80%
+11. **Auto-Verdict Calculation** — Python3 PRIME + bc FALLBACK
+12. **Clean Synthesis** — Assemble PASS outputs
+
+**Verdict Thresholds:**
+- PASS ≥ 0.85 → Stage 5
+- REDO 0.70–0.84 → Stage 3 with specific feedback
+- FORCE < 0.70 → Stage 1 (Root Replan)
 
 **Verification Skills:**
 - `test-master` — comprehensive test writing + coverage
@@ -1403,6 +1577,37 @@ Lessons: <what to remember next session>
 - If contradictions emerge, backtrack to the first point of divergence
 - Maintain a running summary of accepted conclusions
 - Flag assumptions explicitly — distinguish from derived conclusions
+
+---
+
+## 6-Stage Deep Thinking Pipeline (New)
+
+> **مرجع:** راجع `DEEP_THINKING_SKILL.md` و `STAGES_PROMPTS.md` للتفاصيل الكاملة.
+
+السرب الآن يعمل عبر **6 مراحل متسلسلة** — لا تقفز مراحل:
+
+| المرحلة | الاسم | الهدف | المخرجات |
+|----------|-------|-------|----------|
+| **1** | **التخطيط الاستراتيجي العميق** | فهم المهمة من كل الزوايا قبل التنفيذ | `StrategicPlan.md` |
+| **2** | **خطة تنفيذ Decision-Complete** | خطة لا تترك أي قرار للمنفذ | `ImplementationPlan.md` |
+| **3** | **تنفيذ بأعلى كفاءة + Fallback Chain** | تنفيذ متوازي + Fallback ذكي | `WorkerOutputs/`, `Logs/`, `Artifacts/` |
+| **4** | **Auto-Verdict Pipeline (12 خطوة)** | تحقق 100% — PASS/REDO/FORCE | `VerificationReport.md` |
+| **5** | **تحسين مستمر** | Refactor، Performance، Security، Docs | `ImprovementLog.md`، `TechnicalDebtLog.md` |
+| **6** | **مراجعة نهائية + Handoff** | Production Readiness + Decision Log | `FinalReport.md`، `HandoffPackage/` |
+
+**قواعد صارمة:**
+- المراحل **تسلسلية** — لا تقفز
+- `Analysis Channel` للتفكير الخفي (Hidden CoT)
+- `Python Tool` للحسابات الدقيقة
+- `Web Search` إلزامي للحقائق الزمنية (>10% احتمال تغير)
+- `Citations` إلزامية لكل ادعاء واقعي
+- `Verification Step` إلزامي لكل مهمة
+- `Decision Log` تراكمي عبر كل المراحل
+- `Compliance Checklist` قبل كل انتقال مرحلة
+
+**ملفات المرجع:**
+- `DEEP_THINKING_SKILL.md` — مواصفات النظام الكاملة
+- `STAGES_PROMPTS.md` — برومبتات كل مرحلة للنسخ في البرومبت الرئيسي
 
 ---
 
