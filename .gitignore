@@ -1,9 +1,54 @@
-*.orig
-*.log
-session-*.md
-node_modules/
-.env
+# Python
+__pycache__/
+*.pyc
+*.pyo
+*.pyd
+.Python
+*.egg-info/
+dist/
+build/
+.eggs/
+
+# Virtual environments
+venv/
+.env/
+
+# IDE
+.vscode/
+.idea/
+*.swp
+*.swo
+
+# OS
 .DS_Store
-.opencode/logs/
+Thumbs.db
+
+# Logs
+*.log
 logs/
+
+# Backups
+*.bak
 *.bak.*
+*.orig
+*.backup
+
+# Databases
+*.db
+*.sqlite
+
+# Test/Cache
+.pytest_cache/
+.coverage
+htmlcov/
+
+# OpenCode
+.opencode/logs/
+session-*.md
+
+# Node
+node_modules/
+
+# Secrets
+.env.*
+swarm-agent/
