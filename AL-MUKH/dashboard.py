@@ -28,10 +28,7 @@ MASTER_VAULT = "/home/kali/AL-MUKH"
 SPOKE_ROOTS = [
     "/home/kali/Documents/Obsidian Vault",
 ]
-MEILI_URL = os.environ.get("MEILI_URL", "http://127.0.0.1:7700")
-MEILI_KEY = os.environ.get("MEILI_MASTER_KEY", "mukh-dev-key-change-in-prod")
-INDEX_NAME = "mukh-unified"
-
+from config import MEILI_URL, MEILI_KEY, INDEX_NAME
 DASHBOARD_PATH = os.path.join(MASTER_VAULT, "DASHBOARD.md")
 MAP_PATH = os.path.join(MASTER_VAULT, "index", "MAP.md")
 MOC_DIR = os.path.join(MASTER_VAULT, "index")

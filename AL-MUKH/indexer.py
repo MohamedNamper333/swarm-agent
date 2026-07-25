@@ -19,9 +19,7 @@ import urllib.request
 import urllib.error
 
 # ─── Configuration ───────────────────────────────────────────────────────────
-MEILI_URL = os.environ.get("MEILI_URL", "http://127.0.0.1:7700")
-MEILI_KEY = os.environ.get("MEILI_MASTER_KEY", "mukh-dev-key-change-in-prod")
-INDEX_NAME = "mukh-unified"
+from config import MEILI_URL, MEILI_KEY, INDEX_NAME
 
 MASTER_VAULT = "/home/kali/AL-MUKH"
 SPOKES_DIR = os.path.join(MASTER_VAULT, "spokes")
