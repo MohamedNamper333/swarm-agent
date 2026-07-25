@@ -1,7 +1,7 @@
 ---
 title: "Swarm Big Evolution Plan — Master Implementation Plan"
 type: "specification"
-status: "approved"
+status: "planned"
 version: "2.0.0"
 date: "2026-07-23"
 author: "swarm-agent"

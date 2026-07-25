@@ -2,12 +2,14 @@
 > الاختبار، نفّذه، وصحّح نفسه بمقياس صممه هو. لا يوجد transcript فعلي محفوظ أو
 > harness آلي مستقل يتحقق من "Pass criteria". اعتبر هذه الأرقام مؤشر اتجاه أولي فقط،
 > مو دليل أداء موثّق، لين تُبنى طبقة تحقق مستقلة فعلياً (شوف قسم AUTO-VERIFY بـ SKILL.md).
-
+>
 > 🔴 **AUTO-EVALUATION** — هذه الوثيقة تم إنشاؤها تلقائياً بواسطة النظام وليست تدقيقاً بشرياً. الأرقام تعكس التقييم الذاتي للـ swarm وليس تقييم طرف ثالث.
+>
+> ⚠️ **إشعار تصحيح (2026-07-26):** الأرقام أدناه تم تصحيحها لتتوافق مع الحالة الفعلية: 10 Workers (ليس 9)، 1065 مهارة (ليس 679)، 9 موديلات فريدة (13 agent تشارك 9 موديلات — 3 agents تشارك nemotron-3-ultra-free، 2 agents تشارك mimo-v2.5-free، 2 agents تشارك minimax-m3). المهارات غير مربوطة بـ agents في opencode.json (skills: []). P1-P7 لم تُنفذ بعد.
 
 # Swarm Agent — التقييم الشامل (من 100)
 
-> تقييم كامل للنظام: 9 Workers + 679 مهارة + 12 خطوة Pipeline + Provider Injection
+> تقييم كامل للنظام: **10 Workers** + **1065 مهارة** + 12 خطوة Pipeline + Provider Injection
 
 ---
 
@@ -15,8 +17,8 @@
 
 | المعيار | النقاط | شرح |
 |---------|--------|------|
-| Worker Distribution | 19/20 | 9 Workers بتغطية متكاملة — استراتيجي، كود، جودة، بنية تحتية، بحث، تصميم، رؤية، استدلال. |
-| Skill Coverage | 18/20 | 679 مهارة + 1680 مهارة Plugin. يغطي: برمجة (كل اللغات)، سحابة، أمن، AI/ML، تصميم، ألعاب، DevOps. |
+| Worker Distribution | 19/20 | **10 Workers** بتغطية متكاملة — استراتيجي، كود، جودة، بنية تحتية، بحث، تصميم، رؤية، استدلال، **Laguna S 2.1 Free، Ling 3.0 Flash Free**. |
+| Skill Coverage | 18/20 | **1065 مهارة** + 1680 مهارة Plugin. يغطي: برمجة (كل اللغات)، سحابة، أمن، AI/ML، تصميم، ألعاب، DevOps. |
 | Tool Access Balance | 18/20 | كل Worker له أدوات مناسبة — vision بدون Bash، الباقي كامل. |
 | Vision Integration | 19/20 | MiMo V2.5 (تحليل) + MiniMax M3 (تحليل + كود) — تغطية كاملة للوسائط. |
 | Pipeline Design | 20/20 | 12 خطوة متكاملة: P0 → Tool Planning → EXECUTE → REVIEW 1 → REVIEW 2 → Adversarial → Domain → P4 Multi-Angle → MCP → Testing → Auto-Verdict. |
@@ -79,8 +81,8 @@
 
 | المعيار | النقاط | شرح |
 |---------|--------|------|
-| Innovation | 5/5 | Swarm متكامل من 9 موديلات مختلفة (Big Pickle, DeepSeek V4 Flash, Nemotron 3 Nano, Nemotron 3 Ultra, MiMo V2.5, Nemotron 3 Super, MiniMax M3, Hy3, swarm-worker-qa) — كل واحد مجاني. |
-| Cost Efficiency | 5/5 | كل الموديلات مجانية. 679 مهارة بدون تكلفة. |
+| Innovation | 5/5 | Swarm متكامل من **10 موديلات (9 فريدة)** — Big Pickle, DeepSeek V4 Flash, Nemotron 3 Nano, Nemotron 3 Ultra, MiMo V2.5, Nemotron 3 Super, MiniMax M3, Hy3, **Laguna S 2.1 Free، Ling 3.0 Flash Free** — كل واحدة مجانية. **تنبيه:** 3 agents تشارك `nemotron-3-ultra-free` (architect, reviewer, swarm-worker-qa)، 2 agents تشارك `mimo-v2.5-free` (explorer, vision)، 2 agents تشارك `minimax-m3` (vision-max, vision-coder).
+| Cost Efficiency | 5/5 | كل الموديلات مجانية. **1065 مهارة** بدون تكلفة. |
 | Completeness | 4/5 | يغطي: برمجة، سحابة، أمن، تصميم، بحث، AI/ML، DevOps، فيديو/صوت. نقص: طب، قانون مخصص. |
 | **الفرعي** | **14/15** | |
 
@@ -108,7 +110,7 @@
 1. **Pipeline 12 خطوة** — من P0 إلى Auto-Verdict، كل خطوة لها skills ومعايير محددة
 2. **Provider Injection** — 5 Workers كل واحد يستخدم أنماط مزوده الأصلي (ChatGPT QDF, Claude Verify, Grok, Gemini, Mistral)
 3. **Auto-Verdict** — 5 أبعاد × أوزان + 4 Rounds + FORCE-PASS — قرار بدون مقاطعة المستخدم
-4. **9 موديلات مجانية** — كلها free مع 2359 مهارة — نظام إنتاجي بدون تكلفة
+4. **10 موديلات (9 فريدة)** — كلها free مع **2359 مهارة** — نظام إنتاجي بدون تكلفة. **ملاحظة:** 13 agent يستدعي 9 موديلات فريدة فقط (نموذج واحد لـ 3 agents، نموذج لـ 2 agents، نموذج لـ 2 agents).
 5. **Vision مدمج** — MiMo V2.5 (تحليل) + MiniMax M3 (تحليل + كود + 1M context)
 6. **Confidence Tiers** — كل claim بمستوى ثقة (Certain → Speculative)
 7. **Technology Tiers** — Stable / Verified / Experimental — يمنع استخدام Experimental في الإنتاج
@@ -116,7 +118,7 @@
 ### نقاط الضعف 🔴
 
 1. **P5 Verification ليس تلقائياً** — مطلوب إلزامياً لكن يعتمد على Worker أنه ينفذه
-2. **بعض المهارات مكررة** — 679 مهارة فيها تكرار بسيط
+2. **بعض المهارات مكررة** — **1065 مهارة** فيها تكرار بسيط
 3. **اعتماد على Skills خارجية** — 1680 Plugin من vault واحد (FrancoStino) — لو اختفى المصدر
 4. **MCP Integration محدود** — MCP Check موجود و Filesystem MCP مكون لكن الفعالية phụ thuộc vào تشغيل OpenCode
 5. **Session Logging يدوي** — A13 موجود لكن التنفيذ يعتمد على Worker
@@ -136,10 +138,10 @@
 
 | النظام | الموديلات | المهارات | Pipeline | السعر |
 |--------|-----------|----------|----------|-------|
-| **هاي Swarm (هذا)** | 9 موديلات | 679 + 1680 | 12 خطوة | **مجاني** |
+| **هاي Swarm (هذا)** | **10 موديلات (9 فريدة)** | **1065 + 1680** | 12 خطوة | **مجاني** |
 | ChatGPT Teams | 1 موديل | ~50 tool | 3-4 خطوات | $25/شهر |
 | Claude Pro | 1 موديل | ~30 tools | 3-4 خطوات | $20/شهر |
 | Cursor Pro | 1 موديل | limited | خطوتين | $20/شهر |
 | Windsurf | 3 موديلات | limited | 3-4 خطوات | $15/شهر |
 
-**الخلاصة:** هذا الـ Swarm يقدم أكثر من أي نظام تجاري — 9 موديلات، 2359 مهارة، 12 خطوة pipeline، Provider Injection من 5 مزودين — وكل شيء مجاني.
+**الخلاصة:** هذا الـ Swarm يقدم أكثر من أي نظام تجاري — **10 موديلات (9 فريدة)**، **1065 مهارة + 1680 Plugin**، 12 خطوة pipeline، Provider Injection من 5 مزودين — وكل شيء مجاني. **تنبيه:** التقييم ذاتي، P1-P7 لم تُنفذ، skills غير مربوطة بـ agents.

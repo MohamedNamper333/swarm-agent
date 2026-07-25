@@ -92,7 +92,7 @@ graph TB
         A --> D[Scratchpad]
     end
     
-    subgraph "Worker Pool (8)"
+    subgraph "Worker Pool (10)"
         E[Innovator] --> F[Explorer]
         G[Reviewer] --> H[Critic]
         I[Architect] --> J[Reasoner]

@@ -42,6 +42,7 @@
       "hidden": true,
       "description": "QA Worker: builds, runs, verifies, tests code",
       "steps": 15,
+      "skills": ["swarm-constitutional-layer", "swarm-scratchpad", "swarm-token-budget", "swarm-worker-enhanced", "swarm-quality-gates"],
       "tools": {
         "Read": true,
         "Write": true,
@@ -68,6 +69,7 @@
       "hidden": true,
       "description": "Innovator (DeepSeek V4 Flash Free): strategy, brainstorming, first principles",
       "steps": 20,
+      "skills": ["swarm-constitutional-layer", "swarm-scratchpad", "swarm-token-budget", "swarm-worker-enhanced"],
       "tools": {
         "Read": true,
         "Write": false,
@@ -88,12 +90,13 @@
         "edit": "deny"
       }
     },
-    "critic": {
+"critic": {
       "mode": "subagent",
       "model": "ollama-cloud/nemotron-3-nano:30b",
       "hidden": true,
-      "description": "Critic (Nemotron 3 Nano 30B): code review, security review, QA",
+      "description": "Critic (Nemotron 3 Nano): code review, security, QA",
       "steps": 20,
+      "skills": ["swarm-constitutional-layer", "swarm-scratchpad", "swarm-token-budget", "swarm-worker-enhanced"],
       "tools": {
         "Read": true,
         "Write": false,
@@ -114,12 +117,13 @@
         "edit": "ask"
       }
     },
-    "architect": {
+"architect": {
       "mode": "subagent",
       "model": "opencode/nemotron-3-ultra-free",
       "hidden": true,
-      "description": "Architect (Nemotron 3 Ultra Free): implementation, infra, DB",
+      "description": "Architect (Nemotron 3 Ultra): implementation, infra, DB",
       "steps": 20,
+      "skills": ["swarm-constitutional-layer", "swarm-scratchpad", "swarm-token-budget", "swarm-worker-enhanced"],
       "tools": {
         "Read": true,
         "Write": true,
@@ -139,12 +143,13 @@
         }
       }
     },
-    "explorer": {
+"explorer": {
       "mode": "subagent",
       "model": "opencode/mimo-v2.5-free",
       "hidden": true,
       "description": "Explorer (MiMo V2.5 Free): research, web scraping, discovery",
       "steps": 20,
+      "skills": ["swarm-constitutional-layer", "swarm-scratchpad", "swarm-token-budget", "swarm-worker-enhanced"],
       "tools": {
         "Read": true,
         "Write": false,
@@ -167,6 +172,7 @@
       "hidden": true,
       "description": "Reviewer (Nemotron 3 Super): UX, design, product",
       "steps": 20,
+      "skills": ["swarm-constitutional-layer", "swarm-scratchpad", "swarm-token-budget", "swarm-worker-enhanced"],
       "tools": {
         "Read": true,
         "Write": false,
@@ -189,6 +195,7 @@
       "hidden": true,
       "description": "Reasoner (Tencent Hy3 Free): formal logic, critical thinking",
       "steps": 20,
+      "skills": ["swarm-constitutional-layer", "swarm-scratchpad", "swarm-token-budget", "swarm-worker-enhanced"],
       "tools": {
         "Read": true,
         "Write": false,
@@ -211,6 +218,7 @@
       "description": "Vision Agent (MiMo V2.5): multimodal — native image, video, audio understanding.",
       "color": "info",
       "prompt": "أنت Agent رؤية متعدد الوسائط (Omnimodal). عندك MiMo V2.5 اللي يقدر يشوف الصور ويفهم الفيديو والصوت بشكل طبيعي.\n\nمهمتك:\n1. حلّل الصور/الفيديو/الصوت اللي يرسلها المستخدم\n2. استخرج المعلومات منها (نصوص، أرقام، ألوان، تنسيق)\n3. لخص findings بشكل واضح\n4. جاوب على أسئلة محددة حول المحتوى البصري\n\nملاحظة: ما عندك أدوات Bash/Write للتنفيذ — دورك تحليل فقط.\n\nاستخدم Read لقراءة الصور المرفوعة ثم حلّلها.",
+      "skills": ["swarm-constitutional-layer", "swarm-scratchpad", "swarm-token-budget", "swarm-worker-enhanced"],
       "tools": {
         "Read": true,
         "Write": false,
@@ -233,6 +241,7 @@
       "description": "Vision Agent (MiniMax M3): multimodal — image, video, audio, 1M context, coding & agentic tasks.",
       "color": "info",
       "prompt": "أنت Agent رؤية متعدد الوسائط (MiniMax M3). تقدر تشوف الصور وتفهم الفيديو والصوت، وعندك 1M context.\n\nمهمتك:\n1. حلّل الصور/الفيديو/الصوت اللي يرسلها المستخدم\n2. استخرج المعلومات منها\n3. لخص findings بشكل واضح\n4. إذا الطلب يحتاج كتابة كود أو بناء شيء — نفذه مباشرة\n\nأنت تقدر تسوي أي شيء: تحليل + كتابة كود + تشغيل.",
+      "skills": ["swarm-constitutional-layer", "swarm-scratchpad", "swarm-token-budget", "swarm-worker-enhanced"],
       "tools": {
         "Read": true,
         "Write": true,
@@ -254,6 +263,7 @@
       "model": "ollama-cloud/minimax-m3",
       "description": "Vision-Coder (MiniMax M3): multimodal + 1M context + coding",
       "steps": 20,
+      "skills": ["swarm-constitutional-layer", "swarm-scratchpad", "swarm-token-budget", "swarm-worker-enhanced"],
       "tools": {
         "Read": true,
         "Write": true,
@@ -275,6 +285,7 @@
       "hidden": true,
       "description": "Laguna S 2.1 Free: General purpose agent for diverse tasks",
       "steps": 15,
+      "skills": ["swarm-constitutional-layer", "swarm-scratchpad", "swarm-token-budget", "swarm-worker-enhanced"],
       "tools": {
         "Read": true,
         "Write": true,
@@ -298,6 +309,7 @@
       "hidden": true,
       "description": "ling-3.0-flash Free: Fast, reliable flash reasoning for general tasks",
       "steps": 15,
+      "skills": ["swarm-constitutional-layer", "swarm-scratchpad", "swarm-token-budget", "swarm-worker-enhanced"],
       "tools": {
         "Read": true,
         "Write": true,
@@ -354,6 +366,18 @@
         "-y",
         "@a-bonus/google-docs-mcp"
       ],
+      "enabled": true
+    },
+    "ejentum": {
+      "type": "local",
+      "command": [
+        "npx",
+        "-y",
+        "ejentum-mcp"
+      ],
+      "environment": {
+        "EJENTUM_API_KEY": "${EJENTUM_API_KEY}"
+      },
       "enabled": true
     }
   },

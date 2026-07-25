@@ -1,0 +1,16 @@
+{
+  "passed": 6,
+  "total": 6,
+  "overall": true,
+  "details": {
+    "meilisearch_health": true,
+    "index_exists": true,
+    "document_count": 50,
+    "arabic_search": true,
+    "english_search": true,
+    "swarm_simulation": true,
+    "synthesis_sample": "Based on 1 documents about AI agents:\n            \nKey findings from vault:\n[test-002.md] مستند آخر للاختبار...\n\nSynthesis: The vault contains practical implementations of agent patterns including\nconstitutional AI, scratchpad protocols, and multi-agent orchestration.",
+    "vault_server": true
+  },
+  "time": 0.14046454429626465
+}
