@@ -15,8 +15,21 @@ import urllib.error
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 
 MEILI_URL = "http://127.0.0.1:7700"
-MEILI_KEY = "mukh-dev-key-change-in-prod"
 INDEX_NAME = "mukh-unified"
+
+# Load .env if present
+def _load_env():
+    env_path = os.path.join(os.path.dirname(os.path.abspath(__file__)), ".env")
+    if os.path.isfile(env_path):
+        with open(env_path) as f:
+            for line in f:
+                line = line.strip()
+                if line and not line.startswith("#") and "=" in line:
+                    k, v = line.split("=", 1)
+                    os.environ.setdefault(k.strip(), v.strip())
+
+_load_env()
+MEILI_KEY = os.environ.get("MEILI_MASTER_KEY", "mukh-dev-key-change-in-prod")
 TEST_DIR = tempfile.mkdtemp(prefix="mukh-test-")
 
 passed = 0
@@ -222,8 +235,11 @@ test("Reindex created docs", stats.get("numberOfDocuments", 0) > 0, str(stats))
 
 # ─── Test 11: Content Hash (Update Detection) ───────────────────────────────
 print("\n[11] Content Hash / Update Detection")
-doc1, _ = indexer.index_file("/tmp/test-002.md")
-doc2, _ = indexer.index_file("/tmp/test-002.md")
+test_file = os.path.join(TEST_DIR, "hash-test.md")
+with open(test_file, "w") as f:
+    f.write("# Hash Test\n\nهذا اختبار التجزئة والتحديث\n\n-tags: [test, hash]\n")
+doc1, _ = indexer.index_file(test_file)
+doc2, _ = indexer.index_file(test_file)
 if doc1 and doc2:
     test("Same file same hash", doc1["content_hash"] == doc2["content_hash"],
          f"{doc1['content_hash']} == {doc2['content_hash']}")
