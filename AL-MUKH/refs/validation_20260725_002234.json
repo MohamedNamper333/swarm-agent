@@ -1,0 +1,107 @@
+{
+  "validator": "AL-MUKH Validation Suite v1.0",
+  "generated": "2026-07-25T00:22:34Z",
+  "master_vault": "/home/kali/AL-MUKH",
+  "checks": [
+    {
+      "check": "vault_master",
+      "status": "pass",
+      "message": "Master vault OK: /home/kali/AL-MUKH",
+      "timestamp": "2026-07-25T00:22:34.114365+00:00"
+    },
+    {
+      "check": "vault_spoke_Obsidian Vault",
+      "status": "pass",
+      "message": "Spoke OK: /home/kali/Documents/Obsidian Vault",
+      "timestamp": "2026-07-25T00:22:34.114417+00:00"
+    },
+    {
+      "check": "meilisearch_health",
+      "status": "pass",
+      "message": "Meilisearch is available",
+      "timestamp": "2026-07-25T00:22:34.131281+00:00"
+    },
+    {
+      "check": "meilisearch_index",
+      "status": "fail",
+      "message": "Index check failed: HTTP 401",
+      "timestamp": "2026-07-25T00:22:34.133664+00:00"
+    },
+    {
+      "check": "config_yaml",
+      "status": "pass",
+      "message": "config.yaml valid (10 top-level keys)",
+      "timestamp": "2026-07-25T00:22:34.140056+00:00"
+    },
+    {
+      "check": "namespace_registry",
+      "status": "pass",
+      "message": "namespace_registry.json valid (1 spokes)",
+      "timestamp": "2026-07-25T00:22:34.140241+00:00"
+    },
+    {
+      "check": "broken_symlinks",
+      "status": "pass",
+      "message": "No broken symlinks (0 symlinks checked)",
+      "timestamp": "2026-07-25T00:22:34.150246+00:00"
+    },
+    {
+      "check": "duplicate_content",
+      "status": "warn",
+      "message": "2 files share content with 1 hash groups (20 scanned)",
+      "timestamp": "2026-07-25T00:22:34.161002+00:00",
+      "details": [
+        "Hash 91f3fef7144f...: PHASE-2-GATE-VALIDATION.md, PHASE-2-GATE-VALIDATION.md"
+      ]
+    },
+    {
+      "check": "namespace_naming",
+      "status": "pass",
+      "message": "All 1 namespaces follow naming rules",
+      "timestamp": "2026-07-25T00:22:34.161126+00:00"
+    },
+    {
+      "check": "disk_space",
+      "status": "pass",
+      "message": "59.8% used, 63.6 GB free of 181.4 GB",
+      "timestamp": "2026-07-25T00:22:34.161184+00:00"
+    },
+    {
+      "check": "network_meilisearch",
+      "status": "pass",
+      "message": "TCP 127.0.0.1:7700 reachable",
+      "timestamp": "2026-07-25T00:22:34.161419+00:00"
+    },
+    {
+      "check": "sqlite_queue",
+      "status": "pass",
+      "message": "SQLite queue OK (0 rows)",
+      "timestamp": "2026-07-25T00:22:34.162159+00:00",
+      "details": [
+        "Journal: delete",
+        "Tables: 2",
+        "Rows: 0"
+      ]
+    },
+    {
+      "check": "vault_structure",
+      "status": "pass",
+      "message": "Directory overview",
+      "timestamp": "2026-07-25T00:22:34.175196+00:00",
+      "details": [
+        "master: 1235 files (9 .md)",
+        "spokes: 0 files (0 .md)",
+        "refs: 4 files (1 .md)",
+        "search: 10 files (0 .md)",
+        "logs: 0 files (0 .md)"
+      ]
+    }
+  ],
+  "summary": {
+    "total": 13,
+    "pass": 11,
+    "warn": 1,
+    "fail": 1,
+    "status": "FAILED"
+  }
+}

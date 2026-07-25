@@ -1,0 +1,97 @@
+{
+  "scanner": "AL-MUKH Security Scanner v1.0",
+  "generated": "2026-07-25T00:21:48.625719+00:00",
+  "scan_roots": [
+    "/home/kali/AL-MUKH",
+    "/home/kali/Documents/Obsidian Vault"
+  ],
+  "stats": {
+    "docs_scanned": 38,
+    "code_files_scanned": 12,
+    "scan_roots": [
+      "/home/kali/AL-MUKH",
+      "/home/kali/Documents/Obsidian Vault"
+    ],
+    "total_secrets": 4
+  },
+  "summary": {
+    "secret_findings": 4,
+    "permission_issues": 0,
+    "exposed_env_files": 2,
+    "gitignore_ok": false,
+    "severity_breakdown": {
+      "critical": 2,
+      "high": 2
+    },
+    "risk_level": "CRITICAL"
+  },
+  "findings": {
+    "secrets_in_files": [
+      {
+        "file": "/home/kali/AL-MUKH/security.py",
+        "line": 53,
+        "pattern": "private_key",
+        "severity": "critical",
+        "description": "Private key",
+        "match": "----...----",
+        "context": "\"private_key\": {\n        \"regex\": re.compile(r\"\"\"-----BEGIN.*PRIVATE KEY-----\"\"\"),"
+      },
+      {
+        "file": "/home/kali/Documents/Obsidian Vault/vault_server.py",
+        "line": 11,
+        "pattern": "api_key",
+        "severity": "high",
+        "description": "API key",
+        "match": "API_...025\"",
+        "context": "VAULT_PATH = Path(\"/home/kali/Documents/Obsidian Vault\")\nAPI_KEY = \"swarm-evolution-2025\""
+      }
+    ],
+    "secrets_in_code": [
+      {
+        "file": "/home/kali/AL-MUKH/security.py",
+        "line": 53,
+        "pattern": "private_key",
+        "severity": "critical",
+        "description": "Private key",
+        "match": "----...----",
+        "context": "\"regex\": re.compile(r\"\"\"-----BEGIN.*PRIVATE KEY-----\"\"\"),"
+      },
+      {
+        "file": "/home/kali/Documents/Obsidian Vault/vault_server.py",
+        "line": 11,
+        "pattern": "api_key",
+        "severity": "high",
+        "description": "API key",
+        "match": "API_...025\"",
+        "context": "API_KEY = \"swarm-evolution-2025\""
+      }
+    ],
+    "permission_issues": [],
+    "gitignore": {
+      "exists": false,
+      "missing_required": [
+        ".env",
+        ".env.*",
+        "*.pem",
+        "*.key",
+        ".git",
+        "__pycache__"
+      ],
+      "severity": "high"
+    },
+    "exposed_env_files": [
+      {
+        "file": "/home/kali/AL-MUKH/.env",
+        "size_bytes": 81,
+        "has_real_content": true,
+        "severity": "critical"
+      },
+      {
+        "file": "/home/kali/AL-MUKH/.env.example",
+        "size_bytes": 798,
+        "has_real_content": true,
+        "severity": "critical"
+      }
+    ]
+  }
+}

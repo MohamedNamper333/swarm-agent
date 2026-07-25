@@ -7,7 +7,7 @@ date: "2026-07-23"
 author: "swarm-agent"
 tags: ["swarm", "evolution", "plan", "architecture", "constitutional-ai", "scratchpad", "token-budget"]
 difficulty: "very-hard"
-workers_used: ["architect", "innovator", "reasoner", "explorer", "reviewer", "critic", "vision-coder", "swarm-worker-qa"]
+workers_used: ["architect", "innovator", "reasoner", "explorer", "reviewer", "critic", "vision-coder", "swarm-worker-qa", "laguna-s-2-1", "ling-3-0-flash"]
 pipeline_stages: ["analysis", "design", "implementation", "validation", "review", "synthesis"]
 duration_seconds: 0
 quality_score: 10
@@ -32,7 +32,7 @@ Complete transformation of the Swarm Agent System from a fixed 6-stage pipeline 
 | Worker Reasoning | Output only | Hidden Scratchpad | **Transparent** |
 | Token Budget | Fixed ~2,500 | Dynamic 2,500-10,000 | **Optimized** |
 | Auto-Verdict | Inline Python | Skill-based | **Modular** |
-| Worker Count | 8 | 8 Enhanced | **Specialized** |
+| Worker Count | 10 | 10 Enhanced | **Specialized** |
 
 ### 🔑 Critical Findings
 - **Finding 1:** Current system wastes 60%+ tokens on simple tasks due to fixed 6-stage pipeline
@@ -126,7 +126,7 @@ graph LR
 ### Worker Enhancement Map
 ```mermaid
 graph TB
-    subgraph "8 Enhanced Workers"
+    subgraph "10 Enhanced Workers"
         W1[architect] --> H1[harness_code]
         W1 --> S1[constitutional_check]
         W1 --> SC1[scratchpad]
@@ -158,6 +158,14 @@ graph TB
         W8[swarm-worker-qa] --> H1
         W8 --> S1
         W8 --> SC1
+        
+        W9[laguna-s-2-1] --> H1
+        W9 --> S1
+        W9 --> SC1
+        
+        W10[ling-3-0-flash] --> H3
+        W10 --> S1
+        W10 --> SC1
     end
     
     subgraph "Supporting Skills"
@@ -166,7 +174,7 @@ graph TB
         SK3[swarm-token-budget]
         SK4[swarm-memory-protocol]
         SK5[swarm-observability]
-        SK6-13[swarm-worker-enhanced/*]
+        SK6-15[swarm-worker-enhanced/*]
     end
 ```
 
@@ -175,7 +183,7 @@ graph TB
 ## 🔬 Deep Analysis
 
 ### 📖 Context
-The Swarm Agent System currently operates as a coordinator with 8 subagents using a fixed 6-stage pipeline. Analysis reveals critical gaps compared to state-of-the-art systems (Fable 5, GPT-5.5 Thinking, Opus 4.8):
+The Swarm Agent System currently operates as a coordinator with 10 subagents using a fixed 6-stage pipeline. Analysis reveals critical gaps compared to state-of-the-art systems (Fable 5, GPT-5.5 Thinking, Opus 4.8):
 
 | Dimension | Current | Fable 5 | GPT-5.5 | Gap |
 |-----------|---------|---------|---------|-----|
@@ -184,7 +192,7 @@ The Swarm Agent System currently operates as a coordinator with 8 subagents usin
 | Dynamic Pipeline | ❌ Fixed 6 | ❌ | ✅ Implicit | **Complete** |
 | Token Budget | ❌ Fixed | ✅ Internal | ✅ | **Complete** |
 | Self-Correction | ❌ | ✅ RLHF | ✅ | **Complete** |
-| Worker Specialization | ✅ 8 workers | ❌ Single | ❌ Single | **Competitive Advantage** |
+| Worker Specialization | ✅ 10 workers | ❌ Single | ❌ Single | **Competitive Advantage** |
 | Transparency | ✅ Full | ⚠️ Partial | ❌ Zero | **Competitive Advantage** |
 | Skill Extensibility | ✅ 1082 skills | ⚠️ MCP Only | ⚠️ Tools Only | **Competitive Advantage** |
 
@@ -216,7 +224,7 @@ The Swarm Agent System currently operates as a coordinator with 8 subagents usin
 | **No ethical guardrails** | Fast | Dangerous, unreliable | ❌ **Rejected** |
 
 ### 🎯 Key Insight
-**The competitive advantage of 8 specialized workers + full transparency + skill extensibility must be preserved while adding the 3 missing pillars. The adaptive pipeline transforms the fixed architecture from a liability into a strategic asset.**
+**The competitive advantage of 10 specialized workers + full transparency + skill extensibility must be preserved while adding the 3 missing pillars. The adaptive pipeline transforms the fixed architecture from a liability into a strategic asset.**
 
 ---
 
@@ -389,7 +397,7 @@ New Prompt v2.0: 1,773 chars (vs 9,438 = 81% reduction)
 Structure:
 1. THREE PILLARS (mandatory)
 2. RULE #1: Coordinator only — task tool for ALL work
-3. RULE #2: 8 Workers table
+3. RULE #2: 10 Workers table
 4. RULE #3: Parallel dispatch
 5. ADAPTIVE 6-STAGE PIPELINE (with gates)
 6. WORKER OUTPUT SCHEMA (mandatory scratchpad + validation)
@@ -399,7 +407,7 @@ Structure:
 
 ### 🔧 Phase 5: Enhanced Workers (Day 9-10)
 ```yaml
-8 Worker Skills: swarm-worker-enhanced/{architect,critic,innovator,explorer,reasoner,reviewer,vision-coder,swarm-worker-qa}
+10 Worker Skills: swarm-worker-enhanced/{architect,critic,innovator,explorer,reasoner,reviewer,vision-coder,swarm-worker-qa,laguna-s-2-1,ling-3-0-flash}
 
 Each Worker Skill Includes:
 - Default harness assignment
@@ -420,6 +428,8 @@ Worker → Harness → Extra Skills:
 | reviewer | harness_anti_deception | ux-heuristics-reviewer, design-review |
 | vision-coder | harness_code | frontend-ui-engineering, deterministic-design |
 | swarm-worker-qa | harness_code | test-master, vibecode-production-qa-validator |
+| laguna-s-2-1 | harness_reasoning | thinking-lateral, creative-strategy |
+| ling-3-0-flash | harness_reasoning | flash-reasoning, rapid-analysis |
 ```
 
 ### 🔧 Phase 6: Memory & Observability (Day 11-12)
@@ -477,7 +487,7 @@ Documentation:
 | Constitutional Layer at Stage 4 | Single gate, maximum impact | Swarm Orchestrator |
 | Private Scratchpad per worker | Transparency without user noise | Architecture Review |
 | Ejutum Harness with fallback | Structured reasoning, no vendor lock | Architecture Review |
-| 8 Enhanced Worker Skills | Specialization preserved + guardrails | Swarm Orchestrator |
+| 10 Enhanced Worker Skills | Specialization preserved + guardrails | Swarm Orchestrator |
 
 ### ⚠️ Risks Identified
 | Risk | Likelihood | Impact | Mitigation |
@@ -498,7 +508,7 @@ Documentation:
 - [ ] **Ongoing:** Weekly calibration of complexity scorer, constitutional threshold tuning
 
 ### 🔄 Retrospective
-- **What works:** 8-worker delegation, skill system (1082 skills), full transparency, parallel dispatch
+- **What works:** 10-worker delegation, skill system (1082 skills), full transparency, parallel dispatch
 - **What needs fixing:** Fixed pipeline waste, no ethical guardrails, black-box workers, inline Auto-Verdict code
 - **Improvement:** Adaptive pipeline transforms architecture from liability to strategic asset
 
@@ -538,7 +548,7 @@ Documentation:
 | 2 | Scratchpad in 100% worker outputs | Schema validation passes |
 | 3 | Pipeline selector accuracy > 85% | Benchmark vs human classification |
 | 4 | Prompt v2.0 < 2000 chars | Char count |
-| 5 | 8 enhanced workers with harness | Worker protocol tests |
+| 5 | 10 enhanced workers with harness | Worker protocol tests |
 | 6 | Memory handoff works | Integration test |
 | 7 | Quality gates functional | Gate validation tests |
 | 8 | All 5 test cases pass | Test suite green |

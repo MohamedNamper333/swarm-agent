@@ -6,7 +6,7 @@
 - [ ] Verify 5 test cases run
 
 ## P1: Enhanced Workers (Day 2-3)
-- [ ] Create 8 swarm-worker-enhanced skills
+- [ ] Create 10 swarm-worker-enhanced skills
 - [ ] Integrate scratchpad + constitutional + harness per worker
 - [ ] Test with medium complexity task
 

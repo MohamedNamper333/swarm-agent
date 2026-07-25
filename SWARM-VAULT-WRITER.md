@@ -39,7 +39,7 @@ date: "2026-07-23"
 author: "swarm-agent"
 tags: ["swarm", "test", "difficulty:hard", "pipeline:6-stage"]
 difficulty: "easy | medium | hard | very-hard | impossible"
-workers_used: ["innovator", "explorer", "reviewer", "critic", "architect"]
+workers_used: ["innovator", "explorer", "reviewer", "critic", "architect", "laguna-s-2-1", "ling-3-0-flash"]
 pipeline_stages: ["analysis", "design", "implementation", "validation", "review", "synthesis"]
 duration_seconds: 67.3
 quality_score: 9
@@ -187,7 +187,7 @@ Background, constraints, assumptions.
 ```yaml
 # Actual config used
 swarm:
-  workers: 8
+  workers: 10
   pipeline: full
   token_budget: 50000
 ```
