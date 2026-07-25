@@ -1,0 +1,34 @@
+{
+  "global_excludes": [
+    ".obsidian/**",
+    ".git/**",
+    ".trash/**",
+    "*.tmp",
+    "*.swp",
+    "*.bak",
+    "*.orig",
+    "**/__pycache__/**",
+    "**/.DS_Store",
+    "Thumbs.db",
+    "desktop.ini"
+  ],
+  "master_vault_excludes": [
+    "spokes/**",
+    "index/**",
+    "refs/**",
+    "search/**",
+    "logs/**",
+    "docs/**",
+    "config/**",
+    "systemd/**",
+    "*.pyc",
+    "*.pyo",
+    "*.pyd"
+  ],
+  "spoke_excludes": [
+    ".obsidian/**",
+    ".git/**",
+    ".trash/**"
+  ],
+  "size_limit_mb": 100
+}

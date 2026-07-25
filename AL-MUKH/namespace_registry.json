@@ -1,0 +1,19 @@
+{
+  "version": 1,
+  "reserved_prefixes": ["proj-", "research-", "personal-", "archive-", "template-", "area-"],
+  "spokes": {
+    "personal-notes": {
+      "path": "/home/kali/Documents/Obsidian Vault",
+      "type": "personal",
+      "created": "2026-07-23T00:00:00Z",
+      "description": "Main personal notes vault (existing)",
+      "tags": ["personal", "notes", "swarm", "trading"],
+      "status": "active"
+    }
+  },
+  "validation_rules": {
+    "max_spokes_per_prefix": 100,
+    "require_description": true,
+    "require_type": true
+  }
+}

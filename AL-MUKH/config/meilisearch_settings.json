@@ -1,0 +1,56 @@
+{
+  "index_name": "mukh-unified",
+  "settings": {
+    "searchableAttributes": [
+      "title",
+      "content",
+      "headings",
+      "tags",
+      "namespace",
+      "path"
+    ],
+    "filterableAttributes": [
+      "namespace",
+      "type",
+      "tags",
+      "created_at",
+      "modified_at",
+      "file_extension"
+    ],
+    "sortableAttributes": [
+      "created_at",
+      "modified_at",
+      "title"
+    ],
+    "rankingRules": [
+      "words",
+      "typo",
+      "proximity",
+      "attribute",
+      "sort",
+      "exactness"
+    ],
+    "typoTolerance": {
+      "enabled": true,
+      "minWordSizeForTypos": {
+        "oneTypo": 5,
+        "twoTypos": 9
+      }
+    },
+    "faceting": {
+      "maxValuesPerFacet": 100
+    },
+    "pagination": {
+      "maxTotalHits": 10000
+    },
+    "distinctAttribute": null,
+    "synonyms": {
+      "ذكاء اصطناعي": ["AI", "الذكاء الاصطناعي", "artificial intelligence"],
+      "تعلم آلي": ["ML", "machine learning", "تعلم الة"],
+      "سرب": ["swarm", "agents", "وكلاء"],
+      "تداول": ["trading", "finance", "مالية"]
+    },
+    "stopWords": ["في", "من", "إلى", "على", "هذا", "هذه", "ذلك", "التي", "الذي", "أن", "إن"],
+    "analyzer": "ar"
+  }
+}

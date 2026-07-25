@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """Standalone Obsidian Vault REST Server v2.1 - full MCP obsidian-mcp-server v3.2.9 compatibility."""
 
-import os, json, re, urllib.parse, logging, yaml
+import os, json, re, urllib.parse, urllib.request, logging, yaml
 from http.server import HTTPServer, BaseHTTPRequestHandler
 from pathlib import Path
 from datetime import datetime, date
@@ -10,8 +10,22 @@ VAULT_PATH = Path("/home/kali/Documents/Obsidian Vault")
 API_KEY = os.environ.get("VAULT_API_KEY", "swarm-evolution-2025")
 PORT = int(os.environ.get("VAULT_PORT", 27123))
 
+MEILI_URL = "http://127.0.0.1:7700"
+# Admin API key from Meilisearch — used for proxy (search, indexes, documents)
+MEILI_KEY = os.environ.get("MEILI_ADMIN_KEY", "734b57a6bcb3afac0bfcfe1344df9c9d7097b365d918766ff3c98ae4987d93f7")
+DASHBOARD_HTML_PATH = Path(__file__).parent / "AL-MUKH" / "meilisearch-dashboard.html"
+
 logging.basicConfig(level=logging.INFO, format="%(asctime)s %(message)s")
 log = logging.getLogger("vault")
+
+# Load dashboard HTML at startup
+DASHBOARD_HTML = None
+if DASHBOARD_HTML_PATH.exists():
+    try:
+        DASHBOARD_HTML = DASHBOARD_HTML_PATH.read_text(encoding="utf-8")
+        log.info(f"Dashboard loaded: {DASHBOARD_HTML_PATH}")
+    except Exception as e:
+        log.warning(f"Dashboard load failed: {e}")
 
 
 def extract_tags(content):
@@ -184,6 +198,29 @@ class VaultHandler(BaseHTTPRequestHandler):
                         return f
         return None
 
+    def _proxy_meili(self, body=""):
+        """Proxy request to Meilisearch and return response."""
+        path = self.path[len("/api/meili"):]
+        url = f"{MEILI_URL}{path}"
+        method = self.command
+        headers = {"Authorization": f"Bearer {MEILI_KEY}"}
+        if body:
+            headers["Content-Type"] = "application/json"
+        req = urllib.request.Request(url, data=body.encode() if body else None, headers=headers, method=method)
+        try:
+            with urllib.request.urlopen(req, timeout=10) as resp:
+                data = resp.read().decode()
+                self._json(200, json.loads(data) if data else {"ok": True})
+        except urllib.error.HTTPError as e:
+            err_body = ""
+            try:
+                err_body = e.read().decode(errors="replace")
+            except Exception:
+                pass
+            self._json(e.code, {"error": err_body})
+        except Exception as e:
+            self._json(502, {"error": f"Meilisearch unreachable: {e}"})
+
     def do_OPTIONS(self):
         self.send_response(204)
         self.send_header("Access-Control-Allow-Origin", "*")
@@ -230,11 +267,29 @@ class VaultHandler(BaseHTTPRequestHandler):
                 "version": "2.1", "endpoints": [
                     "/vault/", "/vault/{path}", "/tags/", "/commands/",
                     "/search/", "/search/simple/", "/open/{path}",
-                    "/active/", "/periodic/{period}/", "/periodic/{period}/{YYYY}/{MM}/{DD}/"]})
+                    "/active/", "/periodic/{period}/", "/periodic/{period}/{YYYY}/{MM}/{DD}/",
+                    "/dashboard", "/api/meili/*"]})
 
         # Health
         if path == "/health":
             return self._json(200, {"status": "healthy"})
+
+        # Dashboard (no auth required)
+        if path in ("/dashboard/", "/dashboard"):
+            if DASHBOARD_HTML:
+                body = DASHBOARD_HTML.encode("utf-8")
+                self.send_response(200)
+                self.send_header("Content-Type", "text/html; charset=utf-8")
+                self.send_header("Content-Length", str(len(body)))
+                self.send_header("Access-Control-Allow-Origin", "*")
+                self.end_headers()
+                self.wfile.write(body)
+                return
+            return self._json(404, {"error": "Dashboard HTML not found"})
+
+        # Meilisearch proxy (no auth required — Meilisearch handles its own auth)
+        if path.startswith("/api/meili"):
+            return self._proxy_meili()
 
         # Active file (stub — no Obsidian running)
         if path in ("/active/", "/active"):
@@ -332,6 +387,10 @@ class VaultHandler(BaseHTTPRequestHandler):
         qs = urllib.parse.parse_qs(parsed.query)
         body = self._read_body()
         content_type = self.headers.get("Content-Type", "")
+
+        # Meilisearch proxy POST (no vault auth required)
+        if path.startswith("/api/meili"):
+            return self._proxy_meili(body)
 
         if not self._check_auth():
             return self._json(401, {"error": "Unauthorized"})
