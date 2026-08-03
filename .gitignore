@@ -52,3 +52,67 @@ node_modules/
 # Secrets
 .env.*
 swarm-agent/
+
+# Build artifacts
+*.pyc
+__pycache__/
+*.egg-info/
+dist/
+build/
+
+# Logs
+*.log
+
+# Coverage
+.coverage
+htmlcov/
+.tox/
+
+# Mypy
+.mypy_cache/
+*.pyi
+
+# TypeScript
+*.tsbuildinfo
+
+# Distribution
+dist/
+build/
+
+# Environment
+.env
+.env.local
+.env.*.local
+
+# IDE
+.idea/
+.vscode/
+*.swp
+*.swo
+
+# macOS
+.DS_Store
+.AppleDouble
+.LSOverride
+
+# Windows
+Thumbs.db
+ehthumbs.db
+Desktop.ini
+
+# Test
+*.test.js
+*.spec.js
+__snapshots__/
+
+# Logs
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+
+# Local
+*.local
+
+# OS
+.DS_Store
+Thumbs.db

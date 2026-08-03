@@ -34,7 +34,14 @@
           "ling-3-0-flash": "allow"
         },
         "edit": "deny"
-      }
+      },
+      "skills": [
+        "swarm-constitutional-layer",
+        "swarm-memory-protocol",
+        "swarm-observability",
+        "swarm-scratchpad",
+        "swarm-token-budget"
+      ]
     },
     "swarm-worker-qa": {
       "mode": "subagent",
@@ -143,7 +150,8 @@
         "swarm-constitutional-layer",
         "swarm-scratchpad",
         "swarm-token-budget",
-        "swarm-worker-enhanced"
+        "swarm-worker-enhanced",
+        "swarm-vault-writer"
       ],
       "tools": {
         "Read": true,
