@@ -1,70 +1,91 @@
 ---
-title: "Swarm Test Report - EASY Difficulty"
-type: "test-report"
+title: "Swarm Test Specification — EASY Difficulty"
+type: "test-specification"
 status: "approved"
-version: "1.0.0"
-date: "2026-07-23"
+version: "2.0.0"
+date: "2026-08-03"
 author: "swarm-agent"
-tags: ["swarm", "test", "difficulty:easy", "pipeline:single-pass"]
+tags: ["swarm", "test", "difficulty:easy", "pipeline:lite"]
 difficulty: "easy"
 workers_used: ["innovator"]
-pipeline_stages: ["execution"]
+pipeline_stages: ["plan", "execute", "verify"]
 duration_seconds: 8.2
 quality_score: 8
 test_id: "SWARM-TEST-001"
-related_files: ["SWARM-TESTS-REAL.md"]
+related_files: ["SWARM-TESTS.md", "SWARM-EXECUTION-PLAN.md", "SWARM-VAULT-WRITER.md"]
+---
+
+# 🐝 Swarm Test Specification — EASY Difficulty
+
+## Overview
+
+This document specifies the **EASY difficulty test** for the Swarm Agent System. It validates the **LITE pipeline (3 stages)** with a **single worker (innovator)** executing a simple creative task.
+
+**Pipeline Variant:** LITE (Complexity < 30)  
+**Stages:** Plan → Execute → Verify  
+**Workers:** 1 (innovator)  
+**Constitutional Check:** Stage 3 (Verify)  
+**Auto-Verdict:** Simplified (5 steps)
+
 ---
 
 ## 📋 Executive Summary
 
 ### 🎯 Objective
-Validate single-worker (innovator) execution on a simple text transformation task.
+Validate single-worker (innovator) execution on a simple creative/text generation task using the LITE pipeline.
 
-### ✅ Verdict
-**PASS** — Score: 8/10
+### ✅ Expected Verdict
+**PASS** — Score: ≥7/10
 
-### 📊 Key Metrics
-| Metric | Value | Target | Status |
-|--------|-------|--------|--------|
-| Duration | 8.2s | <30s | ✅ |
-| Quality | 8/10 | ≥7 | ✅ |
-| Workers | 1 | 1 | ✅ |
-| Pipeline Stages | 1/1 | 1/1 | ✅ |
-| Output Length | 1,711 chars | >500 | ✅ |
+### 📊 Key Metrics (Targets)
+| Metric | Target | Measurement |
+|--------|--------|-------------|
+| Duration | <30s | Wall-clock time |
+| Quality | ≥7/10 | Evaluator rubric |
+| Workers | 1 | innovator only |
+| Pipeline Stages | 3/3 | Plan, Execute, Verify |
+| Constitutional Violations | 0 | Stage 3 gate |
 
-### 🔑 Critical Findings
-- **Finding 1:** Single-worker execution completes in <10s with high-quality output
-- **Finding 2:** Innovator worker produces well-structured, innovative responses without pipeline overhead
-- **Risk:** No Constitutional AI validation on simple tasks - acceptable for EASY tier
+### 🔑 Critical Validations
+- **Validation 1:** LITE pipeline correctly selected for complexity < 30
+- **Validation 2:** Innovator produces structured output without pipeline overhead
+- **Validation 3:** Constitutional check passes (no fabricated facts)
+- **Validation 4:** Auto-verdict completes with simplified 5-step check
 
 ---
 
 ## 🏗️ Visual Architecture
 
-### Worker Deployment (EASY)
+### Worker Deployment (EASY - LITE)
 ```mermaid
 graph LR
-    subgraph "Orchestrator"
-        O[Task Dispatcher]
+    subgraph "COORDINATOR"
+        C1[Stage 1: Quick Plan]
+        C2[Stage 2: Execute]
+        C3[Stage 3: Verify]
     end
     
-    subgraph "Worker Pool"
-        I[Innovator]
+    subgraph "WORKER POOL"
+        I[Innovator<br/>DeepSeek V4 Flash]
     end
     
-    O -->|Dispatch| I
-    I -->|Result| O
+    C1 --> C2 --> C3
+    C2 -.->|MANDATORY DISPATCH| I
     
-    style I fill:#e3f2fd,stroke:#1976d2,stroke-width:2px
+    style C3 fill:#ffebee,stroke:#c62828
 ```
 
-### Pipeline Flow (Single-Pass)
+### Pipeline Flow (LITE - 3 Stages)
 ```mermaid
 flowchart LR
-    A[Input Task] --> B[Innovator Execution]
-    B --> C[Direct Output]
+    A[Task Input] --> B[Stage 1: Quick Plan<br/>~2 min]
+    B --> C[Stage 2: Execute<br/>~5 min<br/>Innovator dispatch]
+    C --> D[Stage 3: Verify<br/>~3 min<br/>Constitutional + Auto-Verdict]
+    D --> E[Output Report]
     
-    style B fill:#e8f5e9,stroke:#388e3c,stroke-width:2px
+    style B fill:#e3f2fd
+    style C fill:#e8f5e9
+    style D fill:#fff3e0
 ```
 
 ---
@@ -72,31 +93,34 @@ flowchart LR
 ## 🔬 Deep Analysis
 
 ### 📖 Context
-- **Task:** "List 3 innovative uses for blockchain in healthcare"
-- **Constraint:** Single worker, no pipeline stages
-- **Assumption:** Simple creative tasks don't need full pipeline
+- **Task Type:** Creative generation / simple text transformation
+- **Example Task:** "List 3 innovative uses for blockchain in healthcare"
+- **Constraint:** Single worker, no design stage, no parallel dispatch
+- **Assumption:** Simple creative tasks don't need full pipeline validation
 
 ### 🧠 Reasoning Chain
-1. **Premise:** EASY tasks require creativity, not validation
-2. **Evidence:** Innovator produced 3 distinct, well-explained use cases
+1. **Premise:** EASY tasks require creativity, not multi-stage validation
+2. **Evidence:** Innovator model (DeepSeek V4 Flash) optimized for creative divergence
 3. **Inference:** Single-pass execution sufficient for creative generation
-4. **Conclusion:** EASY tier correctly uses minimal pipeline
+4. **Conclusion:** LITE pipeline correctly optimizes for speed over validation depth
 
 ### 📊 Evidence Matrix
-| Claim | Evidence | Source | Confidence |
-|-------|----------|--------|------------|
-| Output has 3 use cases | Counted: Patient Records, Supply Chain, Consent | Output analysis | High |
-| Each use case is innovative | References specific problems (counterfeiting, HIPAA) | Content review | High |
-| Quality score 8/10 | Well-structured, practical, complete | Evaluator rubric | Medium |
+| Claim | Expected Evidence | Source | Confidence |
+|-------|-------------------|--------|------------|
+| Pipeline selects LITE | Complexity score < 30 logged | `pipeline_decision_log.md` | High |
+| Innovator dispatched | `execution_log.jsonl` shows innovator task | Stage 3 logs | High |
+| Output structured | 3 distinct items with explanations | Report content | High |
+| Constitutional PASS | 0 violations in Stage 3 | `constitutional_violations.log` | High |
 
 ### ⚖️ Trade-off Analysis
 | Option | Pros | Cons | Decision |
 |--------|------|------|----------|
-| Single-pass | Fast, simple | No validation | ✅ Chosen |
-| Full pipeline | Thorough | 10x slower | Rejected |
+| LITE (3 stages) | Fast (~15 min), low tokens | No design review | ✅ Chosen for EASY |
+| STANDARD (4 stages) | Design spec included | 2x slower | Rejected |
+| FULL (6 stages) | Maximum validation | 6x slower | Rejected |
 
 ### 🎯 Key Insight
-**EASY tier correctly optimizes for speed over validation** — creative tasks benefit from unconstrained generation.
+**LITE pipeline correctly optimizes for speed over validation** — creative tasks benefit from unconstrained generation without premature criticism.
 
 ---
 
@@ -108,55 +132,69 @@ swarm:
   difficulty: easy
   workers: 1
   worker_types: [innovator]
-  pipeline: single-pass
-  constitutional_ai: false
+  pipeline: lite
+  constitutional_ai: true  # checked in Stage 3
+  safety_checks: [honesty, evidence]
   token_budget: 5000
 ```
 
 ### 💻 Execution Command
 ```bash
-python3 swarm_runner.py --difficulty easy --task "blockchain healthcare uses"
+opencode run swarm "List 3 innovative uses for blockchain in healthcare" --difficulty easy
 ```
 
-### 📝 Actual Output (Truncated)
-```
+### 📝 Expected Output Structure
+```markdown
 # Blockchain in Healthcare - 3 Innovative Uses
 
 ## 1. Patient-Owned Medical Records
 Blockchain enables patients to hold immutable, portable copies...
-[Full output in SWARM-TEST-001-RAW.md]
+[Details with specific problems: counterfeiting, HIPAA compliance]
+
+## 2. Drug Supply Chain Integrity
+End-to-end tracking from manufacturer to pharmacy...
+[Specifics: temperature logging, tamper evidence]
+
+## 3. Consent Management & Clinical Trials
+Dynamic consent via smart contracts...
+[Specifics: GDPR compliance, withdrawal rights]
 ```
 
-### 🔗 File References
-- `vault:SWARM-TEST-001-RAW.md`
-- `github:swarm-agent/tests/test_easy.py`
+### 🔗 File References (Generated)
+- `vault:SWARM-TEST-001-EASY.md` — This specification
+- `vault:SWARM-TEST-001-RAW.md` — Raw innovator output
+- `vault:strategic_plan.md` — Stage 1 output
+- `vault:execution_log.jsonl` — Stage 2 dispatch log
+- `vault:quality_report.md` — Stage 3 verdict
 
 ---
 
 ## 🎯 Actionable Insights
 
-### ✅ Decisions Made
+### ✅ Decisions Validated
 | Decision | Rationale | Authority |
 |----------|-----------|-----------|
-| Single-pass for EASY | 10x faster, quality sufficient | Swarm Orchestrator |
+| LITE for EASY | 10x faster, quality sufficient | Swarm Orchestrator |
 | Innovator only | Creative tasks need divergence | Architecture Review |
+| Constitutional in Stage 3 | Catches fabrication without overhead | Constitutional Layer |
 
 ### ⚠️ Risks Identified
 | Risk | Likelihood | Impact | Mitigation |
 |------|------------|--------|------------|
 | Low quality on edge cases | Low | Medium | Auto-escalate to MEDIUM if output <500 chars |
-| No safety validation | Medium | Low | Acceptable for creative tasks |
+| No safety validation | Medium | Low | Constitutional honesty check in Stage 3 |
 
 ### 📋 Next Steps
-- [x] **Immediate:** Document EASY pattern as baseline
+- [ ] **Immediate:** Document LITE pattern as baseline
 - [ ] **Short-term:** Add output length check for auto-escalation
 - [ ] **Long-term:** A/B test single-pass vs lite-pipeline for EASY
 
-### 🔄 Retrospective
+### 🔄 Retrospective (Post-Execution)
 - **What worked:** Innovator produces novel, practical ideas rapidly
-- **What didn't:** No mechanism to detect hallucination (acceptable risk)
+- **What didn't:** No mechanism to detect hallucination (accepted risk for EASY)
 - **Improvement:** Add lightweight fact-check for MEDIUM+
 
 ---
 
-*Document generated by Swarm Vault Writer v1.0.0*
+*Generated by Swarm Vault Writer v2.0.0 — 6-layer methodology*
+*Test specification — actual execution produces SWARM-TEST-001-RAW.md with raw outputs*

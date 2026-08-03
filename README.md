@@ -7,7 +7,7 @@
 
 ## 🎯 What Is This?
 
-The **Swarm Agent System** is a production-grade multi-agent orchestration framework that executes a **6-stage deep thinking pipeline** with mandatory worker dispatch. It coordinates **10 specialized subagents** across 3 model providers (Anthropic 50%, OpenAI 40%, Google 10%) with Constitutional AI gates, private scratchpad reasoning, and dynamic token budget management.
+The **Swarm Agent System** is a production-grade multi-agent orchestration framework that executes a **6-stage deep thinking pipeline** with mandatory worker dispatch. It coordinates **10 specialized subagents** across 7 free-tier models (Nemotron 3 Ultra ×4, MiMo V2.5 ×4, DeepSeek V4, Hy3, Laguna, Ling, big-pickle) with Constitutional AI gates, private scratchpad reasoning, and dynamic token budget management.
 
 **Core Philosophy:** The Coordinator analyzes → plans → dispatches workers in parallel → verifies via 12-step auto-verdict → improves → hands off. **No implementation work is done by the Coordinator** — all execution is delegated to specialized workers via the `task` tool.
 

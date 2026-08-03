@@ -1,7 +1,28 @@
-# Swarm Vault Writer - Structured Obsidian Writing Methodology
+---
+title: "Swarm Vault Writer — 6-Layer Writing Methodology"
+type: "methodology"
+status: "approved"
+version: "2.0.0"
+date: "2026-08-03"
+author: "swarm-agent"
+tags: ["swarm", "vault-writer", "methodology", "writing-standard"]
+difficulty: "medium"
+pipeline: "STANDARD"
+test_id: "SWARM-VAULT-WRITER"
+related_files: [
+  "SWARM-INDEX-000.md",
+  "SWARM-EXECUTION-PLAN.md",
+  "SWARM-TESTS.md",
+  "skills/swarm-vault-writer/SKILL.md",
+  "vault_client.py"
+]
+---
+
+# 🐝 Swarm Vault Writer — 6-Layer Writing Methodology
 
 ## Purpose
-Standardized, intelligent, and detailed writing methodology for all Swarm Agent outputs stored in Obsidian Vault via vault_client.py.
+
+Standardized, intelligent, and detailed writing methodology for **all Swarm Agent outputs** stored in Obsidian Vault via `vault_client.py`. Every document produced by the swarm follows this 6-layer structure — no exceptions.
 
 ---
 
@@ -32,10 +53,10 @@ Every document follows this 6-layer structure:
 ```yaml
 ---
 title: "Descriptive Title"
-type: "test-report | architecture | decision | research | specification"
+type: "test-report | architecture | decision | research | specification | index | roadmap"
 status: "draft | reviewed | approved | archived"
 version: "1.0.0"
-date: "2026-07-23"
+date: "2026-08-03"
 author: "swarm-agent"
 tags: ["swarm", "test", "difficulty:hard", "pipeline:6-stage"]
 difficulty: "easy | medium | hard | very-hard | impossible"
@@ -47,6 +68,9 @@ test_id: "SWARM-TEST-003"
 related_files: ["SWARM-TESTS.md", "ARCHITECTURE.md"]
 ---
 ```
+
+**Required Fields:** `title`, `type`, `status`, `version`, `date`, `author`, `tags`  
+**Optional Fields:** `difficulty`, `workers_used`, `pipeline_stages`, `duration_seconds`, `quality_score`, `test_id`, `related_files`
 
 ---
 
@@ -97,6 +121,7 @@ graph TB
         G[Reviewer] --> H[Critic]
         I[Architect] --> J[Reasoner]
         K[Vision-Coder] --> L[QA]
+        M[Laguna-S-2-1] --> N[Ling-3.0-Flash]
     end
     
     B --> E
@@ -140,6 +165,28 @@ sequenceDiagram
     C-->>O: Issues found
     O->>I: Iterate
     I-->>O: Final output
+```
+
+### 3d. Conflict/Trade-off Map
+```mermaid
+graph LR
+    subgraph "Conflicts"
+        CF1[Conflict 1]
+        CF2[Conflict 2]
+    end
+    
+    subgraph "Resolutions"
+        R1[Resolution 1]
+        R2[Resolution 2]
+    end
+    
+    CF1 --> R1
+    CF2 --> R2
+    
+    style CF1 fill:#ffcdd2
+    style CF2 fill:#ffcdd2
+    style R1 fill:#c8e6c9
+    style R2 fill:#c8e6c9
 ```
 
 ---
@@ -247,38 +294,48 @@ Stage 2: Design complete (5.1s)
 ### Template: Test Report
 ```
 Layers: 1, 2, 3(pipeline), 4(test-analysis), 5(raw-output), 6
+Required: Metrics table, worker outputs, evidence matrix
 ```
 
 ### Template: Architecture Decision
 ```
 Layers: 1, 2, 3(system + sequence), 4(trade-offs), 5(config), 6
+Required: Trade-off table, decision rationale, rollback plan
 ```
 
 ### Template: Research Report
 ```
 Layers: 1, 2, 3(concept-map), 4(evidence), 5(sources), 6
+Required: Evidence matrix, source citations, confidence levels
 ```
 
 ### Template: Specification
 ```
 Layers: 1, 2, 3(data-flow + api), 4(requirements), 5(interfaces), 6
+Required: API contracts, data models, error handling
+```
+
+### Template: Index/Roadmap
+```
+Layers: 1, 2, 3(overview), 4(details), 5(links), 6
+Required: File inventory, related files, navigation
 ```
 
 ---
 
-## Quality Checklist (Auto-validated)
+## Quality Checklist (Auto-Validated)
 
-Before writing to vault, every document MUST have:
+Before writing to vault, every document **MUST** have:
 
 - [ ] Valid YAML frontmatter with all required fields
 - [ ] Executive Summary with metrics table
-- [ ] At least 1 Mermaid diagram (arch/flow/sequence)
+- [ ] At least 1 Mermaid diagram (arch/flow/sequence/conflict)
 - [ ] Deep Analysis with Evidence Matrix
-- [ ] Implementation Details (or explicit "N/A")
+- [ ] Implementation Details (or explicit "N/A" section)
 - [ ] Actionable Insights with decisions/risks/next-steps
 - [ ] Internal links using `[[wiki-links]]` format
 - [ ] Tags matching `difficulty:*` and `pipeline:*`
-- [ ] Cross-references to related documents
+- [ ] Cross-references to related documents in `related_files`
 
 ---
 
@@ -318,6 +375,16 @@ def build_layered_document(data: dict) -> str:
         build_insights(data)
     ]
     return '\n\n---\n\n'.join(filter(None, layers))
+
+def build_metadata(data):
+    # Generate YAML frontmatter
+    ...
+
+def build_executive_summary(data):
+    # Generate Layer 2
+    ...
+
+# ... etc for each layer
 ```
 
 ---
@@ -325,10 +392,10 @@ def build_layered_document(data: dict) -> str:
 ## Enforcement
 
 **This methodology is MANDATORY for:**
-- All swarm test reports
-- All architecture decisions
+- All swarm test reports (`SWARM-TEST-*.md`)
+- All architecture decisions (`SWARM-*-PLAN.md`, `SWARM-PROJECT-MAP.md`)
 - All research outputs
-- All specifications
+- All specifications (`SWARM-EXECUTION-PLAN.md`)
 - Any document written to Obsidian by swarm agents
 
 **Validation:** Pre-commit hook checks for:
@@ -345,3 +412,9 @@ def build_layered_document(data: dict) -> str:
 | Version | Date | Changes |
 |---------|------|---------|
 | 1.0.0 | 2026-07-23 | Initial methodology |
+| 2.0.0 | 2026-08-03 | Updated for 10-worker pool, Constitutional Gates, actual skill implementations |
+
+---
+
+*Generated by Swarm Vault Writer v2.0.0 — 6-layer methodology*
+*Based on actual skill: `skills/swarm-vault-writer/SKILL.md`*

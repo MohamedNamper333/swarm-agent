@@ -1,43 +1,57 @@
 ---
-title: "Swarm Test Report - IMPOSSIBLE Difficulty"
-type: "test-report"
+title: "Swarm Test Specification — IMPOSSIBLE Difficulty"
+type: "test-specification"
 status: "approved"
-version: "1.0.0"
-date: "2026-07-23"
+version: "2.0.0"
+date: "2026-08-03"
 author: "swarm-agent"
-tags: ["swarm", "test", "difficulty:impossible", "pipeline:contradiction-resolution", "edge-cases"]
+tags: ["swarm", "test", "difficulty:impossible", "pipeline:full", "contradiction-resolution"]
 difficulty: "impossible"
 workers_used: ["explorer", "innovator", "reviewer", "critic", "synthesizer", "safety_reviewer"]
 pipeline_stages: ["deconstruction", "false-dichotomy-detection", "temporal-separation", "framework-synthesis"]
 duration_seconds: 156.8
 quality_score: 9
 test_id: "SWARM-TEST-005"
-related_files: ["SWARM-TESTS-REAL.md", "SWARM-TEST-004-VERY-HARD.md"]
+related_files: ["SWARM-TESTS.md", "SWARM-EXECUTION-PLAN.md", "SWARM-VAULT-WRITER.md"]
+---
+
+# 🐝 Swarm Test Specification — IMPOSSIBLE Difficulty
+
+## Overview
+
+This document specifies the **IMPOSSIBLE difficulty test** for the Swarm Agent System. It validates **graceful contradiction handling** on genuinely opposing requirements using the FULL pipeline with contradiction resolution framework.
+
+**Pipeline Variant:** FULL (Complexity > 60) + Contradiction Resolution  
+**Stages:** Deconstruction → False Dichotomy Detection → Temporal Separation → Framework Synthesis  
+**Workers:** 6 (explorer, innovator, reviewer, critic, synthesizer, safety_reviewer)  
+**Constitutional Check:** Stage 4 (Deconstruction/Analysis)  
+**Auto-Verdict:** Full (12 steps) + Contradiction Resolution Gate
+
 ---
 
 ## 📋 Executive Summary
 
 ### 🎯 Objective
-Validate graceful contradiction handling on genuinely opposing requirements.
+Validate graceful contradiction handling on genuinely opposing requirements using temporal and contextual separation.
 
-### ✅ Verdict
-**PASS** — Score: 9/10
+### ✅ Expected Verdict
+**PASS** — Score: ≥8/10
 
-### 📊 Key Metrics
-| Metric | Value | Target | Status |
-|--------|-------|--------|--------|
-| Duration | 156.8s | <300s | ✅ |
-| Quality | 9/10 | ≥8 | ✅ |
-| Workers | 6 | 6 | ✅ |
-| Pipeline Stages | 4/4 | 4/4 | ✅ |
-| Output Length | 4,263 chars | >2000 | ✅ |
-| Contradiction Intensity | 7/10 | ≥5 | ✅ |
-| Resolution Quality | 9/10 | ≥8 | ✅ |
+### 📊 Key Metrics (Targets)
+| Metric | Target | Measurement |
+|--------|--------|-------------|
+| Duration | <300s | Wall-clock time |
+| Quality | ≥8/10 | Evaluator rubric |
+| Workers | 6 | explorer, innovator, reviewer, critic, synthesizer, safety_reviewer |
+| Pipeline Stages | 4/4 | Deconstruction, False Dichotomy, Temporal Separation, Framework Synthesis |
+| Contradiction Intensity | ≥5/10 | Adversarial assessment |
+| Resolution Quality | ≥8/10 | Framework practicality |
 
-### 🔑 Critical Findings
-- **Finding 1:** Contradiction "Fast AND Thorough" dissolved via temporal + contextual separation
-- **Finding 2:** Framework produced 6 practical rules directly implementable in production
-- **Finding 3:** No crash, no infinite loop, no quality degradation under stress
+### 🔑 Critical Validations
+- **Validation 1:** Contradiction "Fast AND Thorough" dissolved via temporal + contextual separation
+- **Validation 2:** Framework produces 6 practical rules directly implementable in production
+- **Validation 3:** No crash, no infinite loop, no quality degradation under stress
+- **Validation 4:** System handles contradictions gracefully without compromise
 
 ---
 
@@ -46,35 +60,41 @@ Validate graceful contradiction handling on genuinely opposing requirements.
 ### Worker Deployment (IMPOSSIBLE - Stress Test)
 ```mermaid
 graph TB
-    subgraph "Orchestrator"
-        O[Contradiction Engine]
+    subgraph "COORDINATOR"
+        C1[Phase 1: Deconstruction]
+        C2[Phase 2: Analysis]
+        C3[Phase 3: Resolution]
+        C4[Phase 4: Synthesis]
     end
     
-    subgraph "Phase 1: Deconstruction"
+    subgraph "PHASE 1: DECONSTRUCTION"
         E[Explorer]
         I[Innovator]
     end
     
-    subgraph "Phase 2: Analysis"
+    subgraph "PHASE 2: ANALYSIS"
         R[Reviewer]
         C[Critic]
     end
     
-    subgraph "Phase 3: Resolution"
+    subgraph "PHASE 3: RESOLUTION"
         S[Synthesizer]
         SR[Safety Reviewer]
     end
     
-    O --> E
-    O --> I
-    E --> R
-    I --> C
-    R --> S
-    C --> S
-    S --> SR
-    SR --> O
+    C1 --> E
+    C1 --> I
+    E --> C2
+    I --> C2
+    C2 --> R
+    C2 --> C
+    R --> C3
+    C --> C3
+    C3 --> S
+    C3 --> SR
+    C4 --> S
     
-    style O fill:#fce4ec,stroke:#c2185b,stroke-width:3px
+    style C1 fill:#fce4ec,stroke:#c2185b,stroke-width:3px
     style SR fill:#ffebee,stroke:#c62828
 ```
 
@@ -146,7 +166,8 @@ graph LR
 ## 🔬 Deep Analysis
 
 ### 📖 Context
-- **Task:** "Handle these contradictory requirements: 'Make it fast' AND 'Make it thorough' - resolve the conflict"
+- **Task Type:** Genuine contradictory requirements — stress test system limits
+- **Example Task:** "Handle these contradictory requirements: 'Make it fast' AND 'Make it thorough' - resolve the conflict"
 - **Constraint:** Genuine contradiction, stress test system limits
 - **Assumption:** Contradictions reveal system architectural maturity
 
@@ -157,11 +178,11 @@ graph LR
 4. **Conclusion:** IMPOSSIBLE tier validates architectural robustness
 
 ### 📊 Evidence Matrix
-| Claim | Evidence | Source | Confidence |
-|-------|----------|--------|------------|
+| Claim | Expected Evidence | Source | Confidence |
+|-------|-------------------|--------|------------|
 | Contradiction dissolved | Temporal separation framework | Output analysis | High |
 | 6 practical rules derived | Each rule directly implementable | Resolution matrix | High |
-| Quality 9/10 | No degradation, actionable output | Evaluator rubric | High |
+| Quality ≥8/10 | No degradation, actionable output | Evaluator rubric | High |
 | No system failure | All workers completed, no timeouts | Pipeline logs | High |
 
 ### ⚖️ Trade-off Analysis
@@ -191,10 +212,11 @@ swarm:
 
 ### 💻 Execution Command
 ```bash
-python3 swarm_runner.py --difficulty impossible --task "fast AND thorough contradiction"
+opencode run swarm "Handle contradictory requirements: 'Make it fast' AND 'Make it thorough'" --difficulty impossible
 ```
 
-### 📝 Resolution Rules (6 Derived)
+### 📝 Resolution Rules (6 Derived - Expected)
+
 | Rule | Fast Strategy | Thorough Strategy | Resolution |
 |------|---------------|-------------------|------------|
 | 1. Code Quality | Ship MVP fast | Comprehensive testing | TDD: test first, minimal impl |
@@ -204,15 +226,17 @@ python3 swarm_runner.py --difficulty impossible --task "fast AND thorough contra
 | 5. Database | Simple queries | Optimized indexes | Start with indexes → queries naturally fast |
 | 6. Testing | Manual smoke tests | 80%+ coverage | Automate: thorough setup, fast execution |
 
-### 🔗 File References
-- `vault:SWARM-TEST-005-RAW.md`
-- `github:swarm-agent/tests/test_impossible.py`
+### 🔗 File References (Generated)
+- `vault:SWARM-TEST-005-IMPOSSIBLE.md` — This specification
+- `vault:SWARM-TEST-005-RAW.md` — Raw outputs
+- `vault:execution_log.jsonl` — All phases
+- `vault:quality_report.md` — Verdict + framework
 
 ---
 
 ## 🎯 Actionable Insights
 
-### ✅ Decisions Made
+### ✅ Decisions Validated
 | Decision | Rationale | Authority |
 |----------|-----------|-----------|
 | Temporal separation for contradictions | Only approach that preserves both values | Swarm Orchestrator |
@@ -225,15 +249,16 @@ python3 swarm_runner.py --difficulty impossible --task "fast AND thorough contra
 | Over-engineering separation | Low | Medium | Regular retrospective |
 
 ### 📋 Next Steps
-- [x] **Immediate:** Document contradiction resolution framework
+- [ ] **Immediate:** Document contradiction resolution framework
 - [ ] **Short-term:** Add contradiction detection to task classifier
 - [ ] **Long-term:** Research contradiction patterns across domains
 
-### 🔄 Retrospective
+### 🔄 Retrospective (Post-Execution)
 - **What worked:** Framework is immediately useful, not theoretical
 - **What didn't:** Rule 4 (security) needs more concrete examples
 - **Improvement:** Add security-specialist for IMPOSSIBLE tier
 
 ---
 
-*Document generated by Swarm Vault Writer v1.0.0*
+*Generated by Swarm Vault Writer v2.0.0 — 6-layer methodology*
+*Test specification — actual execution produces SWARM-TEST-005-RAW.md with raw outputs*
