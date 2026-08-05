@@ -116,3 +116,13 @@ yarn-error.log*
 # OS
 .DS_Store
 Thumbs.db
+
+# Swarm runtime storage (created by tests, should not be committed)
+swarm/skill_discovery/
+swarm/context_manager/
+swarm/context_compactor/
+swarm/constitutional/
+swarm/reflections/
+swarm/audit/
+swarm/learning/
+swarm/memory/
