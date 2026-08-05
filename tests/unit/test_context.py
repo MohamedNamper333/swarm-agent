@@ -631,6 +631,103 @@ class TestCompactionStrategies:
         )
         assert result is not None
 
+    def test_preserves_90_percent_of_key_decisions_summarize(self, context_manager, compactor):
+        """Roadmap Success Metric: Context compaction preserves 90% of key decisions"""
+        # Text with 7 key decisions
+        text = (
+            "We decided to use PostgreSQL for the database. "
+            "Critical: handle authentication errors. "
+            "TODO: add rate limiting. "
+            "Because of performance requirements, we will use Redis. "
+            "Random unimportant text here. "
+            "Important: deploy to staging first. "
+            "Note: security review required before production. "
+            "Lots of additional unimportant content here."
+        )
+
+        decision_keywords = [
+            "decided to", "will use", "Critical:", "TODO:",
+            "because of", "Important:", "Note:"
+        ]
+        original_decisions = sum(
+            1 for kw in decision_keywords if kw.lower() in text.lower()
+        )
+
+        entry_id = context_manager.set(
+            key="design_notes",
+            value=text,
+            scope=ContextScope.TASK,
+            priority=ContextPriority.MEDIUM,
+            created_by="agent-001"
+        )
+        result = compactor.compact_entry(
+            entry_id, strategy=CompactionStrategy.SUMMARIZE, force=True
+        )
+
+        entries = context_manager.list_entries(scope=ContextScope.TASK)
+        compacted_text = ""
+        for e in entries:
+            if e.id == result.compacted_id:
+                compacted_text = str(e.value)
+                break
+
+        preserved = sum(
+            1 for kw in decision_keywords if kw.lower() in compacted_text.lower()
+        )
+        preservation_rate = (preserved / original_decisions) * 100
+        assert preservation_rate >= 90, (
+            f"Only preserved {preserved}/{original_decisions} "
+            f"({preservation_rate:.0f}%), need >= 90%"
+        )
+
+    def test_preserves_90_percent_of_key_decisions_extract_key(self, context_manager, compactor):
+        """Roadmap Success Metric: Context compaction preserves 90% of key decisions (EXTRACT_KEY)"""
+        text = (
+            "We decided to use PostgreSQL for the database. "
+            "Critical: handle authentication errors. "
+            "TODO: add rate limiting. "
+            "Because of performance requirements, we will use Redis. "
+            "Random unimportant text here. "
+            "Important: deploy to staging first. "
+            "Note: security review required before production. "
+            "Lots of additional unimportant content here."
+        )
+
+        decision_keywords = [
+            "decided to", "will use", "Critical:", "TODO:",
+            "because of", "Important:", "Note:"
+        ]
+        original_decisions = sum(
+            1 for kw in decision_keywords if kw.lower() in text.lower()
+        )
+
+        entry_id = context_manager.set(
+            key="design_notes",
+            value=text,
+            scope=ContextScope.TASK,
+            priority=ContextPriority.MEDIUM,
+            created_by="agent-001"
+        )
+        result = compactor.compact_entry(
+            entry_id, strategy=CompactionStrategy.EXTRACT_KEY, force=True
+        )
+
+        entries = context_manager.list_entries(scope=ContextScope.TASK)
+        compacted_text = ""
+        for e in entries:
+            if e.id == result.compacted_id:
+                compacted_text = str(e.value)
+                break
+
+        preserved = sum(
+            1 for kw in decision_keywords if kw.lower() in compacted_text.lower()
+        )
+        preservation_rate = (preserved / original_decisions) * 100
+        assert preservation_rate >= 90, (
+            f"Only preserved {preserved}/{original_decisions} "
+            f"({preservation_rate:.0f}%), need >= 90%"
+        )
+
 
 class TestCompactorHelpers:
     """Test compactor helper methods"""

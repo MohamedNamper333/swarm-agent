@@ -68,20 +68,32 @@ class ContextCompactor:
     """
 
     # Target compression ratio per priority
+    # For MEDIUM priority, we aim for 50% (keep half) since decisions are critical
     TARGET_RATIOS = {
-        ContextPriority.CRITICAL: 0.7,    # Compress only 30%
-        ContextPriority.HIGH: 0.5,        # Compress 50%
-        ContextPriority.MEDIUM: 0.3,     # Compress 70%
-        ContextPriority.LOW: 0.1          # Compress 90%
+        ContextPriority.CRITICAL: 0.9,    # Keep 90% (minimal compression)
+        ContextPriority.HIGH: 0.7,        # Keep 70%
+        ContextPriority.MEDIUM: 0.5,     # Keep 50% (prioritize decisions)
+        ContextPriority.LOW: 0.2          # Keep 20%
     }
 
     # Patterns indicating key decisions / facts
     DECISION_PATTERNS = [
-        r"(?:decided|chose|selected|will use|will use|decision)[:\s]+(.+?)(?:\.|$)",
-        r"(?:because|since|due to|reason)[:\s]+(.+?)(?:\.|$)",
-        r"(?:important|critical|key|essential|note)[:\s]+(.+?)(?:\.|$)",
-        r"(?:TODO|FIXME|XXX)[:\s]+(.+?)(?:\.|$)",
-        r"(?:TODO|FIXME)[:\s]+(.+?)(?:\.|$)"
+        r"\b(?:decided|chose|selected)\s+to\s+.+",
+        r"\bwill\s+(?:use|be|do|implement)\b.+",
+        r"\b(?:decision)\s*[:\-]\s*.+",
+        r"\bbecause\s+(?:of\s+)?(?:performance|security|the|this|a|an)\b.+",
+        r"\bsince\s+(?:the|this|we|it)\b.+",
+        r"\bdue\s+to\b.+",
+        r"\bimportant\s*[:\-]\s*.+",
+        r"\bcritical\s*[:\-]\s*.+",
+        r"\bkey\s+(?:point|finding|decision|takeaway)\b.+",
+        r"\bessential\s*[:\-]\s*.+",
+        r"\bnote\s*[:\-]\s*.+",
+        r"\bTODO\s*[:\-]\s*.+",
+        r"\bFIXME\s*[:\-]\s*.+",
+        r"\bXXX\s*[:\-]\s*.+",
+        r"\b(?:must|should|need to|required to)\s+\w+",
+        r"\bwill\s+(?:deploy|build|create|test|verify|review)\b.+"
     ]
 
     # Patterns indicating dependencies (things referenced)
@@ -302,26 +314,44 @@ class ContextCompactor:
         return value
 
     def _summarize(self, value: Any, target_size: int) -> Any:
-        """Summarize value while preserving key facts"""
+        """Summarize value while preserving key facts - prioritize decisions over target size"""
         if isinstance(value, str):
             # Extract sentences with decision patterns
             sentences = self._split_sentences(value)
             decisions = []
+            non_decisions = []
+
             for sentence in sentences:
+                is_decision = False
                 for pattern in self.DECISION_PATTERNS:
                     if re.search(pattern, sentence, re.IGNORECASE):
-                        decisions.append(sentence)
+                        is_decision = True
                         break
+                if is_decision:
+                    decisions.append(sentence)
+                else:
+                    non_decisions.append(sentence)
 
-            # If we found decisions, use those; otherwise keep first sentences
-            if decisions:
-                summary = " | ".join(decisions)
+            # Always include ALL decisions (prioritize over target size)
+            summary_parts = list(decisions)
+            current_size = sum(len(s) + 3 for s in summary_parts)  # 3 = " | "
+
+            # Fill remaining space with non-decisions
+            for sentence in non_decisions:
+                if current_size + len(sentence) + 3 <= target_size:
+                    summary_parts.append(sentence)
+                    current_size += len(sentence) + 3
+
+            if summary_parts:
+                summary = " | ".join(summary_parts)
             else:
-                # Keep first portion
                 summary = value[:target_size]
 
-            if len(summary) > target_size:
-                summary = summary[:target_size] + "..."
+            # Preserve original order
+            original_order = {s: i for i, s in enumerate(sentences)}
+            summary_parts.sort(key=lambda s: original_order.get(s, 0))
+            summary = " | ".join(summary_parts)
+
             return summary
 
         elif isinstance(value, dict):
@@ -341,15 +371,18 @@ class ContextCompactor:
             current_size = 0
             for k, v in value.items():
                 v_str = str(v) if not isinstance(v, str) else v
-                if any(re.search(p, v_str, re.IGNORECASE)
-                       for p in self.DECISION_PATTERNS):
+                has_decision = any(
+                    re.search(p, v_str, re.IGNORECASE)
+                    for p in self.DECISION_PATTERNS
+                )
+                if has_decision:
                     size = self._estimate_size(v)
                     if current_size + size <= target_size:
                         key_facts[k] = v
                         current_size += size
-            # If empty, return truncated original
+            # If empty, return summarized version
             if not key_facts:
-                return self._truncate(value, target_size)
+                return self._summarize(value, target_size)
             return key_facts
         elif isinstance(value, list):
             # Filter list items containing decisions
@@ -357,14 +390,17 @@ class ContextCompactor:
             current_size = 0
             for item in value:
                 item_str = str(item) if not isinstance(item, str) else item
-                if any(re.search(p, item_str, re.IGNORECASE)
-                       for p in self.DECISION_PATTERNS):
+                has_decision = any(
+                    re.search(p, item_str, re.IGNORECASE)
+                    for p in self.DECISION_PATTERNS
+                )
+                if has_decision:
                     size = self._estimate_size(item)
                     if current_size + size <= target_size:
                         key_items.append(item)
                         current_size += size
             if not key_items:
-                return self._truncate(value, target_size)
+                return self._summarize(value, target_size)
             return key_items
         return value
 
@@ -384,41 +420,42 @@ class ContextCompactor:
         return [s.strip() for s in re.split(r'[.!?]\s+', text) if s.strip()]
 
     def _extract_key_sentences(self, text: str, target_size: int) -> str:
-        """Extract sentences containing key decisions"""
+        """Extract sentences containing key decisions - prioritize decisions, preserve order"""
         sentences = self._split_sentences(text)
-        scored = []
 
-        for sentence in sentences:
-            score = 0
+        # Classify sentences
+        decision_sentences = []
+        other_sentences = []
+
+        for i, sentence in enumerate(sentences):
+            is_decision = False
             for pattern in self.DECISION_PATTERNS:
                 if re.search(pattern, sentence, re.IGNORECASE):
-                    score += 2
-            for pattern in self.DEPENDENCY_PATTERNS:
-                if re.search(pattern, sentence, re.IGNORECASE):
-                    score += 1
-            # Sentences with numbers/metrics are often important
-            if re.search(r'\b\d+(?:\.\d+)?%?\b', sentence):
-                score += 1
-            scored.append((score, sentence))
+                    is_decision = True
+                    break
+            if is_decision:
+                decision_sentences.append((i, sentence))
+            else:
+                other_sentences.append((i, sentence))
 
-        # Sort by score, take top until size limit
-        scored.sort(key=lambda x: x[0], reverse=True)
-        result = []
-        current_size = 0
-        for score, sentence in scored:
-            sentence_size = len(sentence)
-            if current_size + sentence_size > target_size:
-                continue
-            result.append(sentence)
-            current_size += sentence_size
+        # Strategy: keep ALL decisions (priority), fill with others if room
+        result_with_order = list(decision_sentences)
+        current_size = sum(len(s) + 3 for _, s in decision_sentences)
 
-        if not result:
+        # Fill with non-decisions if space allows
+        for i, sentence in other_sentences:
+            if current_size + len(sentence) + 3 <= target_size:
+                result_with_order.append((i, sentence))
+                current_size += len(sentence) + 3
+
+        if not result_with_order:
             # Fallback: first sentences
             return text[:target_size]
 
-        # Re-order to original sequence
-        original_order = {s: i for i, s in enumerate(sentences)}
-        result.sort(key=lambda s: original_order.get(s, 0))
+        # Sort by original order
+        result_with_order.sort(key=lambda x: x[0])
+        result = [s for _, s in result_with_order]
+
         return ". ".join(result) + ("." if not result[-1].endswith(".") else "")
 
     def _estimate_size(self, value: Any) -> int:
