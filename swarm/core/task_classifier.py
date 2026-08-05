@@ -32,16 +32,16 @@ class TaskClassifier:
     # Keyword patterns for each task type
     PATTERNS = {
         TaskType.CREATIVE: {
-            "keywords": ["brainstorm", "idea", "creative", "innovate", "design", "concept", "prototype", "vision"],
+            "keywords": ["brainstorm", "idea", "creative", "innovate", "prototype", "vision", "concept", "ideate"],
             "weight": 1.0
         },
         TaskType.SECURITY: {
-            "keywords": ["security", "vulnerability", "threat", "audit", "penetration", "exploit", "hack", "secure", "authentication", "authorization", "encryption"],
-            "weight": 1.2
+            "keywords": ["security", "vulnerability", "threat", "audit", "penetration", "exploit", "hack", "secure", "encryption", "vulnerability"],
+            "weight": 1.3
         },
         TaskType.RESEARCH: {
-            "keywords": ["research", "find", "explore", "investigate", "compare", "analyze", "study", "survey", "literature", "benchmark"],
-            "weight": 1.0
+            "keywords": ["research", "find", "explore", "investigate", "compare", "analyze", "study", "survey", "literature", "benchmark", "best practices", "evaluate"],
+            "weight": 1.5
         },
         TaskType.DEBUG: {
             "keywords": ["debug", "fix", "error", "bug", "issue", "broken", "crash", "fail", "exception", "traceback"],
@@ -49,11 +49,15 @@ class TaskClassifier:
         },
         TaskType.REFACTOR: {
             "keywords": ["refactor", "rewrite", "clean up", "improve code", "restructure", "optimize", "simplify", "modernize"],
-            "weight": 1.1
+            "weight": 1.2
         },
         TaskType.QUICK_FIX: {
             "keywords": ["quick", "fast", "simple fix", "minor", "small change", "typo", "one line"],
             "weight": 1.5
+        },
+        TaskType.IMPLEMENTATION: {
+            "keywords": ["implement", "build", "create", "develop", "api", "rest", "service", "endpoint", "feature", "function", "module", "component"],
+            "weight": 1.0
         },
     }
 
@@ -73,6 +77,7 @@ class TaskClassifier:
         """Pre-compile regex patterns for efficiency."""
         self._compiled = {}
         for task_type, config in self.PATTERNS.items():
+            # Case-insensitive word boundary matching
             pattern = r'\b(' + '|'.join(re.escape(kw) for kw in config["keywords"]) + r')\b'
             self._compiled[task_type] = (re.compile(pattern, re.IGNORECASE), config["weight"])
 
@@ -87,8 +92,10 @@ class TaskClassifier:
         for task_type, (pattern, weight) in self._compiled.items():
             matches = pattern.findall(description)
             if matches:
+                # Normalize matches to lowercase for comparison
+                matches_lower = [m.lower() for m in matches]
                 scores[task_type] = len(matches) * weight
-                matched_keywords[task_type] = list(set(matches))
+                matched_keywords[task_type] = list(set(matches_lower))
             else:
                 scores[task_type] = 0
                 matched_keywords[task_type] = []
@@ -108,9 +115,9 @@ class TaskClassifier:
         return TaskClassification(
             task_type=best_type,
             confidence=confidence,
-            complexity=self.assess_complexity(description),
+            complexity=complexity,
             keywords_matched=matched_keywords.get(best_type, []),
-            reasoning=f"Matched {len(matched_keywords.get(best_type, []))} keywords for {best_type.value}"
+            reasoning=f"Premise: Task requires {best_type.value} approach. Evidence: Matched {len(matched_keywords.get(best_type, []))} keywords ({', '.join(matched_keywords.get(best_type, []))}). Inference: {best_type.value.capitalize()} pipeline recommended."
         )
 
     def assess_complexity(self, description: str) -> int:

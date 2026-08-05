@@ -5,6 +5,7 @@ import time
 import threading
 from typing import Dict, List, Optional, Any
 from dataclasses import dataclass, field
+from datetime import datetime
 from enum import Enum
 
 
@@ -29,8 +30,8 @@ class ModelConfig:
 
 @dataclass
 class ModelHealth:
-    model_id: str
-    status: ModelStatus = ModelStatus.UNKNOWN
+    model_key: str
+    status: ModelStatus = ModelStatus.HEALTHY  # Default to HEALTHY
     last_check: float = 0
     consecutive_failures: int = 0
     last_latency: float = 0.0
@@ -103,7 +104,8 @@ class ModelRegistry:
                 for config in configs:
                     key = f"{worker}:{config.id}"
                     if key not in self.health:
-                        self.health[key] = ModelHealth(model_id=key)
+                        # Initialize with HEALTHY status
+                        self.health[key] = ModelHealth(model_key=key, status=ModelStatus.HEALTHY)
 
     def get_models_for_worker(self, worker: str) -> List[ModelConfig]:
         """Get all models for a worker, sorted by priority."""
@@ -127,7 +129,7 @@ class ModelRegistry:
             health = self.health.get(key)
             if not health:
                 return True  # Unknown = assume healthy
-            return health.status == ModelStatus.HEALTHY
+            return health.status in (ModelStatus.HEALTHY, ModelStatus.DEGRADED)
 
     def record_success(self, worker: str, model_id: str, latency: float):
         """Record a successful request."""
@@ -183,7 +185,3 @@ class ModelRegistry:
                     "avg_latency": health.last_latency if health else 0,
                 }
             return stats
-
-    def start_health_monitor(self, interval: int = 300):
-        """Start background health monitoring (placeholder for future implementation)."""
-        pass  # Would run health checks periodically

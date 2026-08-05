@@ -11,7 +11,7 @@ from .task_classifier import TaskClassifier, TaskType
 @dataclass
 class StageConfig:
     name: str
-    min_time: int  # seconds
+    min_time: int
     workers: List[str]
     description: str
     outputs: List[str]
@@ -82,7 +82,7 @@ class DAG:
             node = self.nodes[stage_name]
             deps = [e[0] for e in self.edges if e[1] == stage_name and e[2] == "sequential"]
             
-            if not deps or all(d in [n.name for n in current_group] for d in deps):
+            if not deps or all(d in [n for n in current_group] for d in deps):
                 # Can run in current group
                 current_group.append(node)
             else:
@@ -100,7 +100,7 @@ class DAG:
         """Generate Mermaid diagram."""
         lines = ["flowchart TD"]
         for edge in self.edges:
-            edge_style = "==>" if edge[2] == "sequential" else "-->"
+            edge_style = "-->"
             lines.append(f"    {edge[0]} {edge_style} {edge[1]}")
         return "\n".join(lines)
 

@@ -1,13 +1,17 @@
 """
 Inter-Agent Bus - Pub/Sub communication between agents
 """
-import uuid
 import threading
-from datetime import datetime, timedelta
+import time
+import logging
 from typing import Dict, List, Any, Optional, Callable
-from collections import defaultdict
-from enum import Enum
 from dataclasses import dataclass, field
+from datetime import datetime, timedelta
+from enum import Enum
+from collections import defaultdict
+import uuid
+
+logger = logging.getLogger(__name__)
 
 
 class MessageType(Enum):
@@ -29,7 +33,7 @@ class Message:
     from_agent: str = ""
     to_agent: str = ""  # Empty = broadcast
     channel: str = ""
-    timestamp: str = field(default_factory=lambda: datetime.utcnow().isoformat())
+    timestamp: str = field(default_factory=lambda: datetime.now().isoformat())
     payload: Dict[str, Any] = field(default_factory=dict)
     delivered_to: List[str] = field(default_factory=list)
     acknowledged: bool = False
@@ -96,7 +100,7 @@ class AgentBus:
 
             return message.id
 
-    def send_direct(self, from_agent: str, to_agent: str, message_type: MessageType, payload: Dict) -> str:
+    def send_direct(self, from_agent: str, to_agent: str, message_type: MessageType, payload: Dict) -> Message:
         """Send a direct message to a specific agent."""
         msg = Message(
             type=message_type,
@@ -104,9 +108,10 @@ class AgentBus:
             to_agent=to_agent,
             payload=payload
         )
-        return self.publish(msg)
+        self.publish(msg)
+        return msg
 
-    def broadcast(self, from_agent: str, channel: str, message_type: MessageType, payload: Dict) -> str:
+    def broadcast(self, from_agent: str, channel: str, message_type: MessageType, payload: Dict) -> Message:
         """Broadcast a message to a channel."""
         msg = Message(
             type=message_type,
@@ -114,25 +119,27 @@ class AgentBus:
             channel=channel,
             payload=payload
         )
-        return self.publish(msg)
+        self.publish(msg)
+        return msg
 
     def request_review(self, from_agent: str, artifact: str, reviewers: List[str], 
                        criteria: Optional[List[str]] = None, deadline_minutes: int = 10) -> str:
         """Request a review from one or more reviewers."""
         review_id = str(uuid.uuid4())
         criteria = criteria or ["correctness", "security", "performance", "maintainability"]
-        deadline = (datetime.utcnow() + timedelta(minutes=deadline_minutes)).isoformat()
+        deadline = (datetime.now() + timedelta(minutes=deadline_minutes)).isoformat()
 
-        req = ReviewRequest(
-            review_id=review_id,
-            artifact=artifact,
-            criteria=criteria,
-            deadline=deadline,
-            from_agent=from_agent
-        )
+        req = {
+            "type": "review_request",
+            "review_id": review_id,
+            "artifact": artifact,
+            "criteria": criteria,
+            "deadline": deadline,
+            "from": from_agent
+        }
 
         for reviewer in reviewers:
-            self.send_direct(from_agent, reviewer, MessageType.REVIEW_REQUEST, {
+            self.send_direct(from_agent, f"review.{reviewer}", MessageType.REVIEW_REQUEST, {
                 "review_id": review_id,
                 "artifact": artifact,
                 "criteria": criteria,
@@ -142,7 +149,7 @@ class AgentBus:
 
         with self._lock:
             self.pending_reviews[review_id] = {
-                "requested_at": datetime.utcnow().isoformat(),
+                "requested_at": datetime.now().isoformat(),
                 "reviewers": reviewers,
                 "responses": [],
                 "status": "pending"
@@ -158,7 +165,7 @@ class AgentBus:
             "reviewer": reviewer,
             "verdict": verdict,  # "approve", "reject", "request_changes"
             "findings": findings,
-            "submitted_at": datetime.utcnow().isoformat()
+            "submitted_at": datetime.now().isoformat()
         }
 
         with self._lock:
@@ -193,6 +200,9 @@ class AgentBus:
 
     def handoff_context(self, from_agent: str, to_agent: str, task_id: str, context: Dict) -> Dict:
         """Hand off context from one agent to another."""
+        scratchpad = context.get("scratchpad", "")
+        scratchpad_summary = self._summarize_scratchpad(scratchpad)
+        
         handoff_package = {
             "type": "handoff",
             "task_id": task_id,
@@ -202,13 +212,13 @@ class AgentBus:
                 "goal": context.get("goal"),
                 "decisions_made": context.get("decisions", []),
                 "artifacts": context.get("artifacts", []),
-                "scratchpad_summary": self._summarize_scratchpad(context.get("scratchpad", "")),
+                "scratchpad_summary": scratchpad_summary,
                 "confidence_history": context.get("confidence_history", []),
                 "lessons_learned": context.get("lessons", []),
                 "blockers": context.get("blockers", []),
                 "open_questions": context.get("open_questions", [])
             },
-            "timestamp": datetime.utcnow().isoformat()
+            "timestamp": datetime.now().isoformat()
         }
 
         self.send_direct(from_agent, to_agent, MessageType.HANDOFF, handoff_package)
@@ -219,12 +229,19 @@ class AgentBus:
         if not scratchpad:
             return {}
         
-        key_sections = ["problem_understanding", "assumptions_explicit", "selected_approach", 
-                       "risk_assessment", "confidence_level"]
+        # Try to parse as key-value pairs
         summary = {}
-        for section in key_sections:
-            if section in scratchpad:
-                summary[section] = scratchpad[section]
+        lines = scratchpad.split('\n')
+        for line in lines:
+            if ':' in line:
+                key, value = line.split(':', 1)
+                key = key.strip()
+                value = value.strip()
+                # Only keep key sections
+                key_sections = ["problem_understanding", "assumptions_explicit", "selected_approach", 
+                               "risk_assessment", "confidence_level", "falsification_test"]
+                if key in key_sections:
+                    summary[key] = value
         return summary
 
     def get_message_log(self, agent_id: Optional[str] = None, channel: Optional[str] = None) -> List[Message]:
@@ -241,3 +258,7 @@ class AgentBus:
         """Get all pending reviews."""
         with self._lock:
             return {k: v for k, v in self.pending_reviews.items() if v["status"] == "pending"}
+
+    def _deliver(self, agent_id: str, message: Message):
+        """Deliver message to agent (placeholder for real implementation)."""
+        pass
