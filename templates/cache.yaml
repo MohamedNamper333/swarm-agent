@@ -1,0 +1,12 @@
+name: cache
+version: "1.0.0"
+author: swarm-core
+description: Caching plugin for task results and agent responses
+enabled: true
+priority: 20
+module_path: swarm.plugins.builtin.cache_plugin
+class_name: CachePlugin
+config:
+  backend: memory
+  ttl: 300
+  max_size: 1000

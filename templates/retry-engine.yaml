@@ -1,0 +1,12 @@
+name: retry-engine
+version: "1.0.0"
+author: swarm-core
+description: Retry failed tasks with exponential backoff
+enabled: true
+priority: 40
+module_path: swarm.resilience.retry_engine
+class_name: RetryEngine
+config:
+  max_retries: 3
+  base_delay: 1.0
+  max_delay: 30.0

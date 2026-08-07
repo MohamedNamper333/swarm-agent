@@ -1,0 +1,11 @@
+name: scheduler
+version: "1.0.0"
+author: swarm-core
+description: Task scheduling plugin for cron-like execution
+enabled: true
+priority: 15
+module_path: swarm.plugins.builtin.scheduler_plugin
+class_name: SchedulerPlugin
+config:
+  max_concurrent: 5
+  check_interval: 60

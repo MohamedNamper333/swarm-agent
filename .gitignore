@@ -126,3 +126,11 @@ swarm/reflections/
 swarm/audit/
 swarm/learning/
 swarm/memory/
+swarm/resilience/snapshots/
+swarm/resilience/recovery/
+swarm/resilience/retry_engine/
+swarm/observability/events.jsonl
+swarm/observability/metrics/
+swarm/observability/alerts/
+swarm/api/auth/
+data/

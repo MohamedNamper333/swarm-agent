@@ -1,0 +1,10 @@
+name: metrics
+version: "1.0.0"
+author: swarm-core
+description: Collects task metrics (counts, durations, error rates)
+enabled: true
+priority: 20
+module_path: swarm.plugins.builtin.metrics_plugin
+class_name: MetricsPlugin
+config:
+  enabled: true
