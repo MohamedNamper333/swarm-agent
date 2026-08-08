@@ -2,7 +2,7 @@
 Agent State Machine - FSM per agent for lifecycle management
 """
 from enum import Enum, auto
-from datetime import datetime
+from datetime import datetime, timezone
 from typing import Dict, List, Optional, Any
 from dataclasses import dataclass, field
 import threading
@@ -60,7 +60,7 @@ class AgentStateMachine:
         self.state = AgentState.IDLE
         self.history: List[Dict] = []
         self.current_task: Optional[str] = None
-        self.state_entry_time = datetime.utcnow()
+        self.state_entry_time = datetime.now(timezone.utc)
         self._lock = threading.RLock()
 
     def transition(self, new_state: AgentState, reason: str = "", task: Optional[str] = None) -> bool:
@@ -72,14 +72,14 @@ class AgentStateMachine:
             self.history.append({
                 "from": self.state.name,
                 "to": new_state.name,
-                "at": datetime.utcnow().isoformat(),
+                "at": datetime.now(timezone.utc).isoformat(),
                 "reason": reason,
                 "task": task or self.current_task,
                 "duration_seconds": self.time_in_state()
             })
 
             self.state = new_state
-            self.state_entry_time = datetime.utcnow()
+            self.state_entry_time = datetime.now(timezone.utc)
             if task:
                 self.current_task = task
 
@@ -87,7 +87,7 @@ class AgentStateMachine:
 
     def time_in_state(self) -> float:
         """Get time spent in current state (seconds)."""
-        return (datetime.utcnow() - self.state_entry_time).total_seconds()
+        return (datetime.now(timezone.utc) - self.state_entry_time).total_seconds()
 
     def is_stuck(self, threshold_seconds: Optional[int] = None) -> bool:
         """Check if agent is stuck in current state."""

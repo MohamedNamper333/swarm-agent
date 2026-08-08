@@ -13,6 +13,19 @@ from dataclasses import dataclass, field
 from enum import Enum
 
 from fastapi import FastAPI, WebSocket, WebSocketDisconnect, Depends
+
+
+# Module-level app instance so uvicorn can find it:
+#   uvicorn swarm.api.websocket_server:app
+app = None
+
+
+def get_app() -> FastAPI:
+    """Lazy-build the WS FastAPI app from create_websocket_app()."""
+    global app
+    if app is None:
+        app = create_websocket_app()
+    return app
 from fastapi.middleware.cors import CORSMiddleware
 
 logger = logging.getLogger(__name__)

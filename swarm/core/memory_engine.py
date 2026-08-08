@@ -6,7 +6,7 @@ import time
 import threading
 from typing import Dict, List, Any, Optional
 from dataclasses import dataclass, field
-from datetime import datetime
+from datetime import datetime, timezone
 from enum import Enum
 from collections import defaultdict
 import hashlib
@@ -27,11 +27,11 @@ class MemoryEntry:
     task_id: str
     agent_id: str
     content: Dict[str, Any]
-    timestamp: str = field(default_factory=lambda: datetime.utcnow().isoformat())
+    timestamp: str = field(default_factory=lambda: datetime.now(timezone.utc).isoformat())
     tags: List[str] = field(default_factory=list)
     confidence: float = 1.0
     access_count: int = 0
-    last_accessed: str = field(default_factory=lambda: datetime.utcnow().isoformat())
+    last_accessed: str = field(default_factory=lambda: datetime.now(timezone.utc).isoformat())
 
 
 @dataclass
@@ -42,7 +42,7 @@ class Lesson:
     pattern: str
     lesson: str
     confidence: float
-    created_at: str = field(default_factory=lambda: datetime.utcnow().isoformat())
+    created_at: str = field(default_factory=lambda: datetime.now(timezone.utc).isoformat())
     applications: int = 0
 
 
@@ -119,7 +119,7 @@ class MemoryEngine:
             if session_id in self.working:
                 entry = self.working[session_id]
                 entry.content.update(updates)
-                entry.last_accessed = datetime.utcnow().isoformat()
+                entry.last_accessed = datetime.now(timezone.utc).isoformat()
                 entry.access_count += 1
                 return True
             return False

@@ -3,6 +3,7 @@ Snapshot Manager Module - Pre-stage Snapshots for Quick Recovery
 Creates, manages, and restores point-in-time snapshots of swarm state.
 """
 import os
+import sys
 import json
 import shutil
 import hashlib
@@ -10,7 +11,7 @@ import logging
 import threading
 import time
 from pathlib import Path
-from datetime import datetime
+from datetime import datetime, timezone
 from typing import Dict, List, Any, Optional, Set
 from dataclasses import dataclass, field, asdict
 from enum import Enum
@@ -121,7 +122,7 @@ class SnapshotMetadata:
     def is_expired(self, now_iso: Optional[str] = None) -> bool:
         if not self.retention_until:
             return False
-        return self.retention_until <= (now_iso or datetime.utcnow().isoformat())
+        return self.retention_until <= (now_iso or datetime.now(timezone.utc).isoformat())
 
 
 class SnapshotManager:
@@ -288,14 +289,19 @@ class SnapshotManager:
                     return False
 
                 with tarfile.open(snapshot_file, "r:gz") as tar:
+                    # Python 3.14+ requires explicit filter; 3.13 emits DeprecationWarning.
+                    # Use 'data' filter when supported, otherwise fall back to default.
+                    extract_kwargs = {}
+                    if sys.version_info >= (3, 12):
+                        extract_kwargs["filter"] = "data"
                     if overwrite:
-                        tar.extractall(target)
+                        tar.extractall(target, **extract_kwargs)
                     else:
                         # Only extract files that don't exist
                         for member in tar.getmembers():
                             target_path = target / member.name
                             if not target_path.exists():
-                                tar.extract(member, target)
+                                tar.extract(member, target, **extract_kwargs)
 
                 self.stats.total_restores += 1
                 self.stats.last_restore_time = datetime.now().isoformat()

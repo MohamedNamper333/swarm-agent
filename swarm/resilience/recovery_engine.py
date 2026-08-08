@@ -119,7 +119,7 @@ class RecoveryPlan:
     trigger: str
     strategy: RecoveryStrategy
     steps: List[RecoveryStep] = field(default_factory=list)
-    created_at: str = field(default_factory=lambda: datetime.utcnow().isoformat())
+    created_at: str = field(default_factory=lambda: datetime.now(timezone.utc).isoformat())
     metadata: Dict[str, Any] = field(default_factory=dict)
 
     def add_step(self, step: RecoveryStep) -> None:

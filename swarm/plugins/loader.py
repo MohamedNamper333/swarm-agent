@@ -12,7 +12,7 @@ import time
 from pathlib import Path
 from typing import Any, Dict, List, Optional, Type
 from dataclasses import dataclass, field
-from datetime import datetime
+from datetime import datetime, timezone
 
 try:
     import yaml
@@ -43,7 +43,7 @@ class PluginEntry:
     """Tracks a loaded plugin and its state."""
     name: str
     plugin: BasePlugin
-    loaded_at: str = field(default_factory=lambda: datetime.utcnow().isoformat())
+    loaded_at: str = field(default_factory=lambda: datetime.now(timezone.utc).isoformat())
     enabled: bool = True
     error: Optional[str] = None
 
