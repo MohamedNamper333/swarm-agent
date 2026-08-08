@@ -4,7 +4,11 @@ Provides endpoints for tasks, agents, models, vault, and system health.
 """
 import asyncio
 import logging
+import os
+import tempfile
 import threading
+import time
+import httpx
 from pathlib import Path
 from datetime import datetime, timezone
 from typing import Dict, List, Any, Optional
@@ -16,6 +20,9 @@ from fastapi import FastAPI, HTTPException, Depends, BackgroundTasks, Request
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel, Field
 from contextlib import asynccontextmanager
+
+from swarm.resilience.task_queue import TaskQueue
+from swarm.core.agent_state_machine import AgentState as ASState
 
 logger = logging.getLogger(__name__)
 
@@ -75,6 +82,7 @@ class AgentStateResponse(BaseModel):
     state: str
     current_task: Optional[str] = None
     time_in_state_seconds: float
+    last_active: Optional[str] = None
 
 
 class SystemHealthResponse(BaseModel):
@@ -120,6 +128,55 @@ _constitutional_guard = None
 _skill_discovery = None
 
 
+class _AgentRegistry:
+    """In-memory agent registry — real, no demo data fallback.
+
+    Tracks agent state transitions so the dashboard sees live workers,
+    not hard-coded demo strings.
+    """
+
+    def __init__(self):
+        self._lock = threading.Lock()
+        self._agents: Dict[str, Dict[str, Any]] = {}
+
+    def register(self, agent_id: str, state: ASState):
+        with self._lock:
+            self._agents[agent_id] = {
+                "state": state,
+                "current_task": None,
+                "entered_state_at": time.time(),
+                "last_active": datetime.now(timezone.utc).isoformat(),
+            }
+
+    def transition(self, agent_id: str, state: ASState, current_task: Optional[str] = None):
+        with self._lock:
+            if agent_id not in self._agents:
+                self.register(agent_id, state)
+                return
+            self._agents[agent_id]["state"] = state
+            self._agents[agent_id]["current_task"] = current_task
+            self._agents[agent_id]["entered_state_at"] = time.time()
+            self._agents[agent_id]["last_active"] = datetime.now(timezone.utc).isoformat()
+
+    def list_all(self) -> List[Dict[str, Any]]:
+        with self._lock:
+            now = time.time()
+            out = []
+            for agent_id, rec in self._agents.items():
+                out.append({
+                    "agent_id": agent_id,
+                    "state": rec["state"].value,
+                    "current_task": rec["current_task"],
+                    "time_in_state_seconds": round(now - rec["entered_state_at"], 1),
+                    "last_active": rec["last_active"],
+                })
+            return out
+
+    def get(self, agent_id: str) -> Optional[Dict[str, Any]]:
+        with self._lock:
+            return self._agents.get(agent_id)
+
+
 def set_dependencies(
     task_queue,
     model_registry,
@@ -137,10 +194,27 @@ def set_dependencies(
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
-    """Application lifespan manager"""
+    """Application lifespan manager — builds real TaskQueue + AgentRegistry."""
+    global _task_queue, _agent_state
     logger.info("Starting Swarm REST API server...")
-    yield
-    logger.info("Shutting down Swarm REST API server...")
+
+    storage = Path(os.environ.get("SWARM_QUEUE_PATH",
+                                  tempfile.mkdtemp(prefix="swarm_queue_")))
+    storage.mkdir(parents=True, exist_ok=True)
+    _task_queue = TaskQueue(storage_path=storage)
+    logger.info(f"TaskQueue ready at {storage} (loaded {_task_queue.size()} tasks)")
+
+    _agent_state = _AgentRegistry()
+    _agent_state.register("orchestrator-01", ASState.IDLE)
+    _agent_state.register("coder-01", ASState.IDLE)
+    _agent_state.register("reviewer-01", ASState.IDLE)
+    _agent_state.register("researcher-01", ASState.IDLE)
+    logger.info("AgentRegistry ready (4 agents registered)")
+
+    try:
+        yield
+    finally:
+        logger.info("Shutting down Swarm REST API server...")
 
 
 app = FastAPI(
@@ -158,6 +232,29 @@ app.add_middleware(
     allow_methods=["*"],
     allow_headers=["*"],
 )
+
+
+# ========== Vault Proxy ==========
+
+@app.get("/vault/search")
+async def vault_search(q: str = "", limit: int = 20):
+    """Proxy search to the Obsidian Vault REST server."""
+    vault_url = os.environ.get("VAULT_SERVER_URL", "http://127.0.0.1:27123")
+    vault_key = os.environ.get("VAULT_API_KEY", "swarm-evolution-2025")
+    try:
+        async with httpx.AsyncClient(timeout=5.0) as client:
+            r = await client.get(
+                f"{vault_url}/search/simple/",
+                params={"query": q, "contextLength": 100},
+                headers={"Authorization": f"Bearer {vault_key}"},
+            )
+            r.raise_for_status()
+            data = r.json()
+            hits = data.get("hits", [])
+            return {"results": hits[:limit], "total": len(hits)}
+    except Exception as e:
+        logger.warning(f"Vault search failed: {e}")
+        return {"results": [], "total": 0, "error": str(e)}
 
 
 # ========== Health & System ==========
@@ -185,37 +282,62 @@ async def system_health():
 
 # ========== Tasks ==========
 
+def _task_item_to_response(item) -> TaskResponse:
+    """Convert a TaskQueue QueueItem to the REST TaskResponse model."""
+    tags = []
+    if item.metadata and isinstance(item.metadata, dict):
+        tags = item.metadata.get("tags", [])
+
+    # Map queue status -> API status (pending -> queued, dead_letter -> failed)
+    api_status_map = {
+        "pending": TaskStatus.QUEUED,
+        "running": TaskStatus.RUNNING,
+        "completed": TaskStatus.COMPLETED,
+        "failed": TaskStatus.FAILED,
+        "cancelled": TaskStatus.CANCELLED,
+        "dead_letter": TaskStatus.FAILED,
+    }
+    api_status = api_status_map.get(item.status, TaskStatus.QUEUED)
+
+    # Convert timestamps to ISO strings
+    def iso(ts):
+        if ts is None:
+            return None
+        return datetime.fromtimestamp(ts, timezone.utc).isoformat()
+
+    return TaskResponse(
+        id=item.id,
+        name=item.task_type,
+        payload=item.payload,
+        priority=TaskPriority(item.priority),
+        status=api_status,
+        created_at=iso(item.created_at),
+        started_at=iso(item.started_at),
+        completed_at=iso(item.completed_at),
+        attempts=item.attempts,
+        max_attempts=item.max_attempts,
+        result=None,
+        error=item.last_error,
+        tags=tags,
+        metadata=item.metadata or {},
+    )
+
+
 @app.post("/tasks", response_model=TaskResponse, status_code=201)
 async def create_task(task: TaskCreate, background_tasks: BackgroundTasks):
-    """Create and enqueue a new task"""
+    """Create and enqueue a new task — real TaskQueue."""
     if not _task_queue:
         raise HTTPException(503, "Task queue not available")
-    
-    task_id = _task_queue.enqueue(
-        name=task.name,
+
+    item = _task_queue.enqueue(
+        task_type=task.name,
         payload=task.payload,
-        priority=TaskPriority(task.priority.value),
+        priority=task.priority.value,
         max_attempts=task.max_attempts,
-        tags=task.tags,
-        metadata=task.metadata
+        metadata={"tags": task.tags, **task.metadata},
     )
-    
-    queued_task = _task_queue.get_task(task_id)
-    if not queued_task:
-        raise HTTPException(500, "Failed to create task")
-    
-    return TaskResponse(
-        id=queued_task.id,
-        name=queued_task.name,
-        payload=queued_task.payload,
-        priority=TaskPriority(queued_task.priority.value),
-        status=TaskStatus(queued_task.status.value),
-        created_at=queued_task.created_at,
-        attempts=queued_task.attempts,
-        max_attempts=queued_task.max_attempts,
-        tags=queued_task.tags,
-        metadata=queued_task.metadata
-    )
+
+    return _task_item_to_response(item)
 
 
 @app.get("/tasks", response_model=List[TaskResponse])
@@ -224,79 +346,27 @@ async def list_tasks(
     priority: Optional[TaskPriority] = None,
     limit: int = 50
 ):
-    """List tasks with optional filters"""
+    """List tasks with optional filters — real TaskQueue, no demo data."""
     if not _task_queue:
-        # Engine not initialized — return demo tasks so the dashboard pipeline chart renders.
-        # This is intentionally inert (read-only).
-        return [
-            TaskResponse(
-                id="t-001", name="Parse auth headers", payload={"src": "middleware"},
-                priority=TaskPriority.HIGH, status=TaskStatus.COMPLETED,
-                created_at=datetime.now(timezone.utc).isoformat(),
-                started_at=datetime.now(timezone.utc).isoformat(),
-                completed_at=datetime.now(timezone.utc).isoformat(),
-                attempts=1, max_attempts=3, tags=["auth"], metadata={},
-            ),
-            TaskResponse(
-                id="t-002", name="Rotate refresh token", payload={"user_id": 42},
-                priority=TaskPriority.NORMAL, status=TaskStatus.COMPLETED,
-                created_at=datetime.now(timezone.utc).isoformat(),
-                started_at=datetime.now(timezone.utc).isoformat(),
-                completed_at=datetime.now(timezone.utc).isoformat(),
-                attempts=1, max_attempts=3, tags=["auth"], metadata={},
-            ),
-            TaskResponse(
-                id="t-003", name="Review PR #142", payload={"pr": 142},
-                priority=TaskPriority.NORMAL, status=TaskStatus.RUNNING,
-                created_at=datetime.now(timezone.utc).isoformat(),
-                started_at=datetime.now(timezone.utc).isoformat(),
-                completed_at=None, attempts=1, max_attempts=3, tags=["review"], metadata={},
-            ),
-            TaskResponse(
-                id="t-004", name="Index vault entries", payload={"count": 24},
-                priority=TaskPriority.LOW, status=TaskStatus.QUEUED,
-                created_at=datetime.now(timezone.utc).isoformat(),
-                started_at=None, completed_at=None, attempts=0, max_attempts=3,
-                tags=["vault"], metadata={},
-            ),
-        ]
-    
-    all_tasks = []
+        raise HTTPException(503, "Task queue not initialized")
+
+    all_tasks: List[Any] = []
     if priority:
-        all_tasks.extend(_task_queue.list_queued(priority=TaskPriority(priority.value)))
+        all_tasks.extend(_task_queue.list(priority=priority.value))
     else:
-        all_tasks.extend(_task_queue.list_queued())
-    
-    # Add running tasks
-    for t in _task_queue.list_running():
-        all_tasks.append(t)
-    
-    # Filter by status
+        all_tasks.extend(_task_queue.list())
+
     if status:
-        all_tasks = [t for t in all_tasks if t.status.value == status.value]
-    
-    # Limit
+        wanted = {status.value}
+        if status.value == "queued":
+            wanted = {"pending"}
+        elif status.value == "failed":
+            wanted = {"failed", "dead_letter"}
+        all_tasks = [t for t in all_tasks if t.status in wanted]
+
     all_tasks = all_tasks[:limit]
-    
-    return [
-        TaskResponse(
-            id=t.id,
-            name=t.name,
-            payload=t.payload,
-            priority=TaskPriority(t.priority.value),
-            status=TaskStatus(t.status.value),
-            created_at=t.created_at,
-            started_at=t.started_at,
-            completed_at=t.completed_at,
-            attempts=t.attempts,
-            max_attempts=t.max_attempts,
-            result=t.result,
-            error=t.error,
-            tags=t.tags,
-            metadata=t.metadata
-        )
-        for t in all_tasks
-    ]
+
+    return [_task_item_to_response(t) for t in all_tasks]
 
 
 @app.get("/tasks/{task_id}", response_model=TaskResponse)
@@ -304,27 +374,12 @@ async def get_task(task_id: str):
     """Get task by ID"""
     if not _task_queue:
         raise HTTPException(503, "Task queue not available")
-    
-    task = _task_queue.get_task(task_id)
+
+    task = _task_queue.get(task_id)
     if not task:
         raise HTTPException(404, "Task not found")
-    
-    return TaskResponse(
-        id=task.id,
-        name=task.name,
-        payload=task.payload,
-        priority=TaskPriority(task.priority.value),
-        status=TaskStatus(task.status.value),
-        created_at=task.created_at,
-        started_at=task.started_at,
-        completed_at=task.completed_at,
-        attempts=task.attempts,
-        max_attempts=task.max_attempts,
-        result=task.result,
-        error=task.error,
-        tags=task.tags,
-        metadata=task.metadata
-    )
+
+    return _task_item_to_response(task)
 
 
 @app.delete("/tasks/{task_id}")
@@ -332,12 +387,12 @@ async def cancel_task(task_id: str):
     """Cancel a task"""
     if not _task_queue:
         raise HTTPException(503, "Task queue not available")
-    
+
     success = _task_queue.cancel(task_id)
     if not success:
-        raise HTTPException(404, "Task not found")
-    
-    return {"message": "Task cancelled"}
+        raise HTTPException(404, "Task not found or not cancellable")
+
+    return {"message": "Task cancelled", "task_id": task_id}
 
 
 @app.post("/tasks/{task_id}/retry")
@@ -348,25 +403,24 @@ async def retry_task(task_id: str):
     
     # For retry, we need to fail it with retry=True
     # This is a simplified approach
-    task = _task_queue.get_task(task_id)
+    task = _task_queue.get(task_id)
     if not task:
         raise HTTPException(404, "Task not found")
-    
-    if task.status.value not in ["failed", "dead_letter"]:
+
+    if task.status not in ["failed", "dead_letter"]:
         raise HTTPException(400, "Can only retry failed tasks")
-    
+
     # Re-enqueue by canceling and re-enqueuing
     _task_queue.cancel(task_id)
-    new_id = _task_queue.enqueue(
-        name=task.name,
+    new_item = _task_queue.enqueue(
+        task_type=task.task_type,
         payload=task.payload,
-        priority=TaskPriority(task.priority.value),
+        priority=task.priority,
         max_attempts=task.max_attempts,
-        tags=task.tags,
-        metadata=task.metadata
+        metadata=task.metadata,
     )
-    
-    return {"message": "Task re-enqueued", "new_task_id": new_id}
+
+    return {"message": "Task re-enqueued", "new_task_id": new_item.id}
 
 
 # ========== Models ==========
@@ -395,37 +449,20 @@ async def model_health(model_id: str):
 
 @app.get("/agents", response_model=List[AgentStateResponse])
 async def list_agents():
-    """List all agents and their states"""
+    """List all agents and their states — real AgentRegistry, no demo data."""
     if not _agent_state:
-        # Engine not initialized — return demo agents so the dashboard renders meaningfully.
-        # This is intentionally inert (read-only, no state mutations).
-        return [
-            AgentStateResponse(
-                agent_id="orchestrator-01", state="idle",
-                current_task=None, time_in_state_seconds=12.0,
-                last_active=datetime.now(timezone.utc).isoformat(),
-            ),
-            AgentStateResponse(
-                agent_id="coder-01", state="busy",
-                current_task="Implement OAuth refresh token rotation",
-                time_in_state_seconds=4.2,
-                last_active=datetime.now(timezone.utc).isoformat(),
-            ),
-            AgentStateResponse(
-                agent_id="reviewer-01", state="busy",
-                current_task="Review PR #142 — refactor middleware",
-                time_in_state_seconds=8.7,
-                last_active=datetime.now(timezone.utc).isoformat(),
-            ),
-            AgentStateResponse(
-                agent_id="researcher-01", state="idle",
-                current_task=None, time_in_state_seconds=22.5,
-                last_active=datetime.now(timezone.utc).isoformat(),
-            ),
-        ]
+        raise HTTPException(503, "Agent registry not initialized")
 
-    # Placeholder
-    return []
+    return [
+        AgentStateResponse(
+            agent_id=rec["agent_id"],
+            state=rec["state"],
+            current_task=rec["current_task"],
+            time_in_state_seconds=rec["time_in_state_seconds"],
+            last_active=rec["last_active"],
+        )
+        for rec in _agent_state.list_all()
+    ]
 
 
 @app.get("/agents/{agent_id}/state", response_model=AgentStateResponse)
@@ -532,8 +569,12 @@ async def queue_stats():
     """Get queue statistics"""
     if not _task_queue:
         raise HTTPException(503, "Task queue not available")
-    
-    return _task_queue.get_stats()
+
+    return {
+        "size": _task_queue.size(),
+        "status": _task_queue.get_status().value,
+        "breakdown": _task_queue.status_breakdown(),
+    }
 
 
 # ========== Metrics ==========

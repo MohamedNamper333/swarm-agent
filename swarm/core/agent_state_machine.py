@@ -9,16 +9,16 @@ import threading
 
 
 class AgentState(Enum):
-    IDLE = auto()
-    ASSIGNED = auto()
-    SCRATCHPAD = auto()
-    EXECUTING = auto()
-    REVIEW_PENDING = auto()
-    APPROVED = auto()
-    REJECTED = auto()
-    BLOCKED = auto()
-    ERROR = auto()
-    TIMEOUT = auto()
+    IDLE = "idle"
+    ASSIGNED = "assigned"
+    SCRATCHPAD = "scratchpad"
+    EXECUTING = "executing"
+    REVIEW_PENDING = "review_pending"
+    APPROVED = "approved"
+    REJECTED = "rejected"
+    BLOCKED = "blocked"
+    ERROR = "error"
+    TIMEOUT = "timeout"
 
 
 @dataclass
