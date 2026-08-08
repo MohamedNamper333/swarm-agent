@@ -472,5 +472,95 @@
       "chmod 777*": "deny"
     },
     "webfetch": "allow"
+  },
+
+  "_swarm_runtime": {
+    "_comment": "Phase 1+2+3 runtime configuration (roadmap-swarm.md PART G + PART C). Read by swarm/core/config_loader.py. NOT a runtime requirement for opencode itself.",
+
+    "pipeline_templates": {
+      "creative": ["analyze", "ideate", "design", "review", "verify", "handoff"],
+      "security": ["analyze", "design", "security_audit", "implement", "test", "verify", "handoff"],
+      "research": ["analyze", "ideate", "document", "verify", "handoff"],
+      "implementation": ["analyze", "design", "implement", "review", "test", "optimize", "verify", "handoff"],
+      "debug": ["analyze", "implement", "test", "verify", "handoff"],
+      "refactor": ["analyze", "design", "implement", "review", "test", "handoff"],
+      "quick_fix": ["analyze", "implement", "verify", "handoff"]
+    },
+
+    "dynamic_behavior": {
+      "auto_switch_on_failure": true,
+      "parallel_probe": true,
+      "mid_task_switch": false,
+      "health_check_interval": 300,
+      "circuit_breaker": {
+        "failure_threshold": 3,
+        "recovery_timeout": 600
+      }
+    },
+
+    "tools": {
+      "task_analyzer": {
+        "module": "swarm.core.task_classifier",
+        "class": "TaskClassifier",
+        "enabled": true
+      },
+      "dag_builder": {
+        "module": "swarm.core.task_dag",
+        "class": "DAGBuilder",
+        "enabled": true
+      },
+      "agent_router": {
+        "module": "swarm.core.agent_router",
+        "class": "AgentRouter",
+        "enabled": true
+      },
+      "model_selector": {
+        "module": "swarm.core.model_registry",
+        "class": "ModelRegistry",
+        "enabled": true
+      },
+      "auto_verdict": {
+        "module": "swarm.core.auto_verdict",
+        "class": "AutoVerdictEngine",
+        "enabled": true
+      },
+      "vault_search": {
+        "module": "vault_client",
+        "function": "get_vault_client",
+        "enabled": true
+      },
+      "vault_write": {
+        "module": "vault_client",
+        "function": "get_vault_client",
+        "enabled": true
+      }
+    },
+
+    "vault_integration": {
+      "enabled": true,
+      "server_url": "http://127.0.0.1:27123",
+      "default_namespace": "*",
+      "auto_index": true
+    },
+
+    "observability": {
+      "metrics_enabled": true,
+      "metrics_port": 9090,
+      "log_level": "INFO",
+      "structured_logging": true,
+      "alert_webhooks": []
+    },
+
+    "api": {
+      "rest_host": "127.0.0.1",
+      "rest_port": 8000,
+      "websocket_host": "127.0.0.1",
+      "websocket_port": 8001,
+      "dashboard_url": "http://localhost:5173",
+      "cors_origins": ["http://localhost:5173", "http://127.0.0.1:5173"]
+    },
+
+    "templates_dir": "templates/",
+    "plugins_dir": "swarm/plugins/builtin/"
   }
 }
