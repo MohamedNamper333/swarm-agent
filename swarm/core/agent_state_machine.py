@@ -1,11 +1,19 @@
 """
 Agent State Machine - FSM per agent for lifecycle management
+
+VETO State:
+- Added for ethics/safety veto (absolute block)
+- Terminal state (no automatic transitions out)
+- Manual override required to reset
 """
+import logging
 from enum import Enum, auto
 from datetime import datetime, timezone
 from typing import Dict, List, Optional, Any
 from dataclasses import dataclass, field
 import threading
+
+logger = logging.getLogger(__name__)
 
 
 class AgentState(Enum):
@@ -19,6 +27,7 @@ class AgentState(Enum):
     BLOCKED = "blocked"
     ERROR = "error"
     TIMEOUT = "timeout"
+    VETOED = "vetoed"  # New: absolute veto by ethics/safety
 
 
 @dataclass
@@ -35,16 +44,17 @@ class AgentStateMachine:
     """Finite State Machine for agent lifecycle management."""
 
     TRANSITIONS = {
-        AgentState.IDLE: [AgentState.ASSIGNED],
-        AgentState.ASSIGNED: [AgentState.SCRATCHPAD, AgentState.ERROR],
-        AgentState.SCRATCHPAD: [AgentState.EXECUTING, AgentState.BLOCKED],
-        AgentState.EXECUTING: [AgentState.REVIEW_PENDING, AgentState.ERROR, AgentState.TIMEOUT],
-        AgentState.REVIEW_PENDING: [AgentState.APPROVED, AgentState.REJECTED, AgentState.BLOCKED],
-        AgentState.REJECTED: [AgentState.SCRATCHPAD, AgentState.BLOCKED],
-        AgentState.APPROVED: [AgentState.IDLE],
-        AgentState.BLOCKED: [AgentState.SCRATCHPAD, AgentState.IDLE],
-        AgentState.ERROR: [AgentState.SCRATCHPAD, AgentState.IDLE],
-        AgentState.TIMEOUT: [AgentState.SCRATCHPAD, AgentState.IDLE],
+        AgentState.IDLE: [AgentState.ASSIGNED, AgentState.VETOED],
+        AgentState.ASSIGNED: [AgentState.SCRATCHPAD, AgentState.ERROR, AgentState.VETOED],
+        AgentState.SCRATCHPAD: [AgentState.EXECUTING, AgentState.BLOCKED, AgentState.VETOED],
+        AgentState.EXECUTING: [AgentState.REVIEW_PENDING, AgentState.ERROR, AgentState.TIMEOUT, AgentState.VETOED],
+        AgentState.REVIEW_PENDING: [AgentState.APPROVED, AgentState.REJECTED, AgentState.BLOCKED, AgentState.VETOED],
+        AgentState.REJECTED: [AgentState.SCRATCHPAD, AgentState.BLOCKED, AgentState.VETOED],
+        AgentState.APPROVED: [AgentState.IDLE, AgentState.VETOED],
+        AgentState.BLOCKED: [AgentState.SCRATCHPAD, AgentState.IDLE, AgentState.VETOED],
+        AgentState.ERROR: [AgentState.SCRATCHPAD, AgentState.IDLE, AgentState.VETOED],
+        AgentState.TIMEOUT: [AgentState.SCRATCHPAD, AgentState.IDLE, AgentState.VETOED],
+        AgentState.VETOED: [AgentState.IDLE],
     }
 
     # Timeouts in seconds
@@ -62,6 +72,8 @@ class AgentStateMachine:
         self.current_task: Optional[str] = None
         self.state_entry_time = datetime.now(timezone.utc)
         self._lock = threading.RLock()
+        # VETO tracking
+        self.veto_info: Optional[Dict[str, Any]] = None  # {"by": str, "category": str, "reason": str, "at": str}
 
     def transition(self, new_state: AgentState, reason: str = "", task: Optional[str] = None) -> bool:
         """Transition to a new state if valid."""
@@ -75,7 +87,8 @@ class AgentStateMachine:
                 "at": datetime.now(timezone.utc).isoformat(),
                 "reason": reason,
                 "task": task or self.current_task,
-                "duration_seconds": self.time_in_state()
+                "duration_seconds": self.time_in_state(),
+                "veto_info": self.veto_info if new_state == AgentState.VETOED else None,
             })
 
             self.state = new_state
@@ -83,7 +96,50 @@ class AgentStateMachine:
             if task:
                 self.current_task = task
 
+            # Clear veto_info if leaving VETOED state
+            if self.state == AgentState.IDLE and self.veto_info:
+                self.veto_info = None
+
             return True
+
+    def veto(self, vetoed_by: str, category: str, reason: str) -> bool:
+        """Apply absolute VETO from any state."""
+        self.veto_info = {
+            "by": vetoed_by,
+            "category": category,
+            "reason": reason,
+            "at": datetime.now(timezone.utc).isoformat(),
+        }
+        return self.transition(
+            AgentState.VETOED,
+            reason=f"VETO by {vetoed_by}: {category} — {reason}",
+            task=self.current_task,
+        )
+
+    def override_veto(self, override_by: str, reason: str = "Manual override") -> bool:
+        """Manually override VETO and return to IDLE. Requires authorization."""
+        if self.state != AgentState.VETOED:
+            return False
+        old_veto = self.veto_info
+        self.veto_info = {
+            **old_veto,
+            "overridden_by": override_by,
+            "override_reason": reason,
+            "override_at": datetime.now(timezone.utc).isoformat(),
+        }
+        # Record override in history before clearing
+        self.history.append({
+            "from": AgentState.VETOED.name,
+            "to": AgentState.IDLE.name,
+            "at": datetime.now(timezone.utc).isoformat(),
+            "reason": f"VETO OVERRIDE by {override_by}: {reason}",
+            "task": self.current_task,
+            "veto_info": old_veto,
+        })
+        self.state = AgentState.IDLE
+        self.state_entry_time = datetime.now(timezone.utc)
+        self.current_task = None
+        return True
 
     def time_in_state(self) -> float:
         """Get time spent in current state (seconds)."""
@@ -122,13 +178,19 @@ class AgentStateMachine:
             "is_stuck": self.is_stuck(),
             "stuck_reason": self.get_stuck_reason(),
             "valid_transitions": self.get_valid_transitions(),
-            "history_count": len(self.history)
+            "history_count": len(self.history),
+            "veto_info": self.veto_info,
+            "is_vetoed": self.state == AgentState.VETOED,
         }
 
     def reset(self, reason: str = "Manual reset"):
-        """Reset to IDLE state."""
+        """Reset to IDLE state. Cannot reset from VETOED — use override_veto instead."""
+        if self.state == AgentState.VETOED:
+            logger.warning(f"Cannot reset {self.agent_id} from VETOED — use override_veto()")
+            return False
         self.transition(AgentState.IDLE, reason)
         self.current_task = None
+        return True
 
     def get_history(self, limit: Optional[int] = None) -> List[Dict]:
         """Get transition history."""

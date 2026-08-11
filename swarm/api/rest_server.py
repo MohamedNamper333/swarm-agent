@@ -603,6 +603,174 @@ async def metrics_json():
     }
 
 
+# ========== Enterprise: VETO & Budget ==========
+
+class VetoRequest(BaseModel):
+    agent_id: str
+    vetoed_by: str
+    category: str
+    reason: str
+    context: Optional[Dict[str, Any]] = None
+
+
+class VetoResponse(BaseModel):
+    agent_id: str
+    vetoed: bool
+    veto_info: Optional[Dict[str, Any]] = None
+    error: Optional[str] = None
+
+
+class VetoOverrideRequest(BaseModel):
+    agent_id: str
+    override_by: str
+    reason: str
+
+
+class VetoOverrideResponse(BaseModel):
+    agent_id: str
+    overridden: bool
+    error: Optional[str] = None
+
+
+# Registry of enterprise state machines (VETO-capable)
+_enterprise_state_machines: Dict[str, Any] = {}
+
+
+def register_enterprise_sm(agent_id: str, sm) -> None:
+    """Register an AgentStateMachine for VETO API access."""
+    _enterprise_state_machines[agent_id] = sm
+
+
+@app.post("/veto", response_model=VetoResponse)
+async def apply_veto(request: VetoRequest):
+    """Apply absolute VETO to an agent (ethics/safety override)."""
+    from swarm.core.agent_state_machine import AgentStateMachine
+
+    sm = _enterprise_state_machines.get(request.agent_id)
+    if not sm:
+        # إنشاء واحدة جديدة للاختبار
+        sm = AgentStateMachine(request.agent_id)
+        sm.transition(sm.state.__class__.ASSIGNED, "auto-created for VETO")
+        _enterprise_state_machines[request.agent_id] = sm
+
+    success = sm.veto(
+        vetoed_by=request.vetoed_by,
+        category=request.category,
+        reason=request.reason,
+    )
+    if not success:
+        return VetoResponse(
+            agent_id=request.agent_id,
+            vetoed=False,
+            error="VETO transition failed",
+        )
+    return VetoResponse(
+        agent_id=request.agent_id,
+        vetoed=True,
+        veto_info=sm.veto_info,
+    )
+
+
+@app.post("/veto/override", response_model=VetoOverrideResponse)
+async def override_veto(request: VetoOverrideRequest):
+    """Manually override VETO (requires authorization)."""
+    sm = _enterprise_state_machines.get(request.agent_id)
+    if not sm:
+        return VetoOverrideResponse(
+            agent_id=request.agent_id,
+            overridden=False,
+            error="Agent not found or not VETOED",
+        )
+    success = sm.override_veto(
+        override_by=request.override_by,
+        reason=request.reason,
+    )
+    return VetoOverrideResponse(
+        agent_id=request.agent_id,
+        overridden=success,
+        error=None if success else "Override failed",
+    )
+
+
+@app.get("/veto/{agent_id}")
+async def get_veto_status(agent_id: str):
+    """Get VETO status of an agent."""
+    sm = _enterprise_state_machines.get(agent_id)
+    if not sm:
+        raise HTTPException(404, f"Agent {agent_id} not registered")
+    return {
+        "agent_id": agent_id,
+        "is_vetoed": sm.state.name == "VETOED",
+        "veto_info": sm.veto_info,
+        "current_state": sm.state.name,
+        "valid_transitions": sm.get_valid_transitions(),
+    }
+
+
+@app.get("/veto")
+async def list_vetoed_agents():
+    """List all currently VETOED agents."""
+    vetoed = []
+    for agent_id, sm in _enterprise_state_machines.items():
+        if sm.state.name == "VETOED":
+            vetoed.append({
+                "agent_id": agent_id,
+                "veto_info": sm.veto_info,
+                "vetoed_at": sm.state_entry_time.isoformat(),
+                "time_in_state_seconds": sm.time_in_state(),
+            })
+    return {"vetoed_agents": vetoed, "count": len(vetoed)}
+
+
+# ========== Budget Tracking ==========
+
+class BudgetRequest(BaseModel):
+    action: str  # "check" | "record" | "report"
+    model_id: Optional[str] = None
+    tokens_used: Optional[int] = None
+    daily_limit: Optional[int] = None
+
+
+class BudgetResponse(BaseModel):
+    action: str
+    model_id: Optional[str] = None
+    usage: Optional[Dict[str, Any]] = None
+    allowed: Optional[bool] = None
+    remaining: Optional[int] = None
+
+
+@app.post("/budget")
+async def budget_action(request: BudgetRequest):
+    """Budget tracking: check, record, report."""
+    try:
+        from swarm.resilience.rate_limiter_v2 import get_rate_limiter
+        limiter = get_rate_limiter()
+
+        if request.action == "check":
+            allowed, current, limit = limiter.check_limit(request.model_id)
+            return BudgetResponse(
+                action="check",
+                model_id=request.model_id,
+                allowed=allowed,
+                remaining=limit - current,
+                usage={"current": current, "limit": limit},
+            )
+        elif request.action == "record":
+            allowed = limiter.record_usage(request.model_id, request.tokens_used or 1)
+            return BudgetResponse(
+                action="record",
+                model_id=request.model_id,
+                allowed=allowed,
+            )
+        elif request.action == "report":
+            report = limiter.get_report()
+            return {"action": "report", "report": report}
+        else:
+            raise HTTPException(400, f"Unknown action: {request.action}")
+    except Exception as e:
+        raise HTTPException(500, str(e))
+
+
 # Run with: uvicorn swarm.api.rest_server:app --host 0.0.0.0 --port 8000
 if __name__ == "__main__":
     import uvicorn
