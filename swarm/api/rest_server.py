@@ -823,6 +823,295 @@ async def budget_action(request: BudgetRequest):
         raise HTTPException(500, str(e))
 
 
+# ========== Enterprise: SwarmMaster + Department Endpoints ==========
+#
+# Phase C: REST API coverage for all 10 departments
+# Provides direct HTTP access to:
+# - /swarm/process (Master endpoint)
+# - /board/deliberate
+# - /csuite/meeting, /csuite/budget
+# - /code/pipeline, /code/review
+# - /design/brand-kit, /design/image
+# - /video/promo
+# - /research/full
+# - /data/analyze
+# - /language/translate
+# - /knowledge/query
+# - /safety/check
+# - /swarm/status, /swarm/agents (info)
+
+# Global SwarmMaster instance (lazy init)
+_swarm_master = None
+
+
+def get_swarm_master():
+    """يرجع SwarmMaster singleton."""
+    global _swarm_master
+    if _swarm_master is None:
+        from swarm.enterprise.swarm_master import SwarmMaster
+        _swarm_master = SwarmMaster()
+    return _swarm_master
+
+
+# ========== Request Models ==========
+
+class SwarmProcessRequest(BaseModel):
+    """طلب لمعالجته عبر SwarmMaster."""
+    question: str
+    type: str = "general"
+    estimated_cost: float = 0.0
+    context: Dict[str, Any] = Field(default_factory=dict)
+    bypass_safety: bool = False
+
+
+class BoardDeliberateRequest(BaseModel):
+    """طلب لمناقشة المجلس."""
+    question: str
+    context: Dict[str, Any] = Field(default_factory=dict)
+
+
+class CSuiteMeetingRequest(BaseModel):
+    """طلب لاجتماع C-Suite."""
+    proposal: Dict[str, Any]
+
+
+class CodeReviewRequest(BaseModel):
+    """طلب لمراجعة كود."""
+    code: str
+    language: str = "python"
+
+
+class DesignBrandKitRequest(BaseModel):
+    """طلب لـ brand kit."""
+    brand_name: str
+
+
+class DesignImageRequest(BaseModel):
+    """طلب لتوليد صورة."""
+    prompt: str
+    width: int = 1024
+    height: int = 1024
+
+
+class VideoPromoRequest(BaseModel):
+    """طلب لفيديو ترويجي."""
+    title: str
+    description: str
+    target_audience: str = ""
+
+
+class ResearchRequest(BaseModel):
+    """طلب بحثي."""
+    query: str
+
+
+class DataQuestionRequest(BaseModel):
+    """طلب لتحليل بيانات."""
+    question: str
+
+
+class TranslationRequest(BaseModel):
+    """طلب ترجمة."""
+    text: str
+    source_lang: str = "en"
+    target_lang: str = "ar"
+
+
+class KnowledgeQueryRequest(BaseModel):
+    """طلب استعلام قاعدة معرفة."""
+    question: str
+
+
+class SafetyCheckRequest(BaseModel):
+    """طلب فحص محتوى."""
+    text: str
+    use_llm: bool = False
+
+
+# ========== Endpoints ==========
+
+@app.post("/swarm/process")
+async def swarm_process(request: SwarmProcessRequest):
+    """Master endpoint: معالجة طلب عبر كل الـ tiers (Safety → Board → C-Suite → Dept)."""
+    from swarm.enterprise.swarm_master import SwarmRequest
+    master = get_swarm_master()
+    req = SwarmRequest(
+        question=request.question,
+        type=request.type,
+        estimated_cost=request.estimated_cost,
+        context=request.context,
+        bypass_safety=request.bypass_safety,
+    )
+    result = master.process(req)
+    return {
+        "request_id": result.request_id,
+        "verdict": result.verdict,
+        "final_decision": result.final_decision,
+        "vetoed_by": result.vetoed_by,
+        "veto_reason": result.veto_reason,
+        "executed_by": result.executed_by,
+        "stages": result.stages,
+        "output": str(result.output)[:500] if result.output else None,
+        "metadata": result.metadata,
+    }
+
+
+@app.get("/swarm/status")
+async def swarm_status():
+    """حالة الـ SwarmMaster."""
+    master = get_swarm_master()
+    return master.get_status()
+
+
+@app.get("/swarm/agents")
+async def swarm_agents():
+    """قائمة بكل الـ agents حسب القسم."""
+    master = get_swarm_master()
+    return master.list_agents()
+
+
+@app.post("/board/deliberate")
+async def board_deliberate(request: BoardDeliberateRequest):
+    """يدعو المجلس لمناقشة اقتراح."""
+    master = get_swarm_master()
+    result = master.board.deliberate(request.question, context=str(request.context))
+    return {
+        "verdict": result.final_decision,
+        "vetoed_by": result.vetoed_by,
+        "veto_reason": result.veto_reason,
+        "votes": result.votes,
+    }
+
+
+@app.post("/csuite/meeting")
+async def csuite_meeting(request: CSuiteMeetingRequest):
+    """يدعو C-Suite لاجتماع تنفيذي."""
+    master = get_swarm_master()
+    return master.csuite.executive_meeting(request.proposal)
+
+
+@app.get("/csuite/budget")
+async def csuite_budget():
+    """حالة ميزانية CFO."""
+    master = get_swarm_master()
+    return master.csuite.cfo.get_status()
+
+
+@app.post("/code/review")
+async def code_review(request: CodeReviewRequest):
+    """مراجعة كود عبر CodeReviewer."""
+    master = get_swarm_master()
+    from swarm.enterprise.code import Severity
+    report = master.depts["code"].reviewer.full_review(request.code, request.language)
+    return {
+        "approved": report.approved,
+        "score": report.total_score,
+        "findings_count": len(report.findings),
+        "critical": sum(1 for f in report.findings if f.severity == Severity.CRITICAL),
+        "high": sum(1 for f in report.findings if f.severity == Severity.HIGH),
+        "findings": [
+            {
+                "severity": f.severity.value,
+                "line": f.line,
+                "description": f.description,
+                "cwe_id": f.cwe_id,
+            }
+            for f in report.findings[:10]
+        ],
+    }
+
+
+@app.post("/design/brand-kit")
+async def design_brand_kit(request: DesignBrandKitRequest):
+    """يولّد brand kit كامل."""
+    master = get_swarm_master()
+    return master.depts["design"].generate_complete_brand_kit(request.brand_name)
+
+
+@app.post("/design/image")
+async def design_image(request: DesignImageRequest):
+    """يولّد صورة."""
+    master = get_swarm_master()
+    asset = master.depts["design"].image_gen_1.generate(
+        request.prompt, request.width, request.height
+    )
+    return {
+        "type": asset.asset_type.value,
+        "format": asset.format.value,
+        "author": asset.author,
+        "metadata": asset.metadata,
+    }
+
+
+@app.post("/video/promo")
+async def video_promo(request: VideoPromoRequest):
+    """ينشئ فيديو ترويجي."""
+    master = get_swarm_master()
+    from swarm.enterprise.video import VideoDuration, VideoFormat
+    brief = {"title": request.title, "description": request.description, "target_audience": request.target_audience}
+    result = master.depts["video"].create_promo_video(brief)
+    return result
+
+
+@app.post("/research/full")
+async def research_full(request: ResearchRequest):
+    """بحث شامل: تخطيط → بحث → fact check."""
+    master = get_swarm_master()
+    return master.depts["research"].full_research(request.query)
+
+
+@app.post("/data/analyze")
+async def data_analyze(request: DataQuestionRequest):
+    """تحليل سؤال بيانات."""
+    master = get_swarm_master()
+    return master.depts["data"].analyze_question(request.question)
+
+
+@app.post("/language/translate")
+async def language_translate(request: TranslationRequest):
+    """ترجمة نص."""
+    master = get_swarm_master()
+    result = master.depts["language"].translator.translate(
+        request.text, request.source_lang, request.target_lang
+    )
+    return {
+        "translated_text": result.translated_text,
+        "source_lang": result.source_lang,
+        "target_lang": result.target_lang,
+        "confidence": result.confidence,
+        "model": result.model_used,
+    }
+
+
+@app.post("/knowledge/query")
+async def knowledge_query(request: KnowledgeQueryRequest):
+    """استعلام قاعدة المعرفة."""
+    master = get_swarm_master()
+    result = master.depts["knowledge"].query(request.question, top_k=3, rerank=True)
+    return {
+        "query": result.query,
+        "documents": [
+            {"score": d.score, "content": d.content[:200]}
+            for d in result.documents
+        ],
+        "reranked": result.reranked,
+        "total_score": result.total_score,
+    }
+
+
+@app.post("/safety/check")
+async def safety_check(request: SafetyCheckRequest):
+    """فحص محتوى عبر Safety Dept."""
+    master = get_swarm_master()
+    report = master.safety_dept.full_check(request.text, use_llm=request.use_llm)
+    return {
+        "verdict": report.verdict.value,
+        "flags": report.flags,
+        "explanation": report.explanation,
+        "analyst_votes": {k: v.value for k, v in report.analyst_votes.items()},
+    }
+
+
 # Run with: uvicorn swarm.api.rest_server:app --host 0.0.0.0 --port 8000
 if __name__ == "__main__":
     import uvicorn
