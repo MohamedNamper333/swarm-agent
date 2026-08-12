@@ -178,18 +178,22 @@ class CFO(CSuiteAgentBase):
 
     DAILY_BUDGET_LIMIT = 0.0  # $0/month = $0/day
 
-    def __init__(self, executor, safety, cache=None, budget_limit: float = 0.0):
+    def __init__(self, executor, safety, cache=None, budget_limit: float = float("inf")):
         chain = EnterpriseModelRegistry.get_chain("cfo")
         super().__init__("cfo", chain, executor, safety, cache)
         self._budget_used = 0.0
-        self._budget_limit = budget_limit
+        self._budget_limit = budget_limit if budget_limit > 0 else float("inf")
         self._lock = threading.Lock()
 
     def _build_prompt(self, context: Dict, extra: str) -> str:
+        if self._budget_limit == float("inf"):
+            budget_str = "unlimited"
+        else:
+            budget_str = f"${self._budget_used:.2f} / ${self._budget_limit:.2f}"
         return (
             f"As CFO, evaluate the financial impact:\n"
             f"Context: {context}\n"
-            f"Daily budget used: ${self._budget_used:.2f} / ${self._budget_limit:.2f}\n"
+            f"Daily budget used: {budget_str}\n"
             f"Focus: cost, ROI, sustainability\n"
             f"Decide: approve/reject/escalate"
         )
@@ -197,7 +201,9 @@ class CFO(CSuiteAgentBase):
     def check_budget(self, amount: float) -> bool:
         """يتحقق من توفر الميزانية. يستخدم circuit breaker."""
         with self._lock:
-            pct = (self._budget_used + amount) / max(self._budget_limit, 0.01)
+            if self._budget_limit == float("inf"):
+                return True  # unlimited
+            pct = (self._budget_used + amount) / self._budget_limit
             if pct >= 0.80:
                 logger.warning(
                     f"CFO budget circuit breaker: {pct*100:.1f}% used, halting non-critical calls"
@@ -213,12 +219,20 @@ class CFO(CSuiteAgentBase):
     def get_status(self) -> Dict[str, Any]:
         """حالة الميزانية الحالية."""
         with self._lock:
+            if self._budget_limit == float("inf"):
+                return {
+                    "used": self._budget_used,
+                    "limit": "unlimited",
+                    "remaining": "unlimited",
+                    "pct_used": 0.0,
+                    "circuit_breaker": False,
+                }
             return {
                 "used": self._budget_used,
                 "limit": self._budget_limit,
                 "remaining": max(self._budget_limit - self._budget_used, 0),
-                "pct_used": (self._budget_used / max(self._budget_limit, 0.01)) * 100,
-                "circuit_breaker": self._budget_used / max(self._budget_limit, 0.01) >= 0.80,
+                "pct_used": (self._budget_used / self._budget_limit) * 100,
+                "circuit_breaker": self._budget_used / self._budget_limit >= 0.80,
             }
 
 
@@ -337,7 +351,7 @@ class CSuiteOrchestrator:
         executor: FallbackChainExecutor,
         safety: InlineSafetyFilter,
         cache=None,
-        cfo_budget_limit: float = 0.0,
+        cfo_budget_limit: float = float("inf"),
     ):
         self.ceo = CEO(executor, safety, cache)
         self.cto = CTO(executor, safety, cache)
@@ -432,7 +446,7 @@ def create_c_suite(
     executor: Optional[FallbackChainExecutor] = None,
     safety: Optional[InlineSafetyFilter] = None,
     cache=None,
-    cfo_budget_limit: float = 0.0,
+    cfo_budget_limit: float = float("inf"),
 ) -> CSuiteOrchestrator:
     exe = executor or FallbackChainExecutor()
     sf = safety or InlineSafetyFilter()

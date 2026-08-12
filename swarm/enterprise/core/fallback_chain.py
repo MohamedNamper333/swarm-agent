@@ -110,9 +110,18 @@ class FallbackChainExecutor:
         return nim_call
 
     @staticmethod
-    def _placeholder_call(model_id: str, prompt: Any, **kwargs: Any) -> Any:
-        """Placeholder for tests / when no API key. Returns predictable output."""
-        return {"model": model_id, "prompt": str(prompt)[:200], "placeholder": True}
+    def _placeholder_call(model_id: str, prompt: Any, timeout: float = 0.0, **kwargs: Any) -> Any:
+        """Smart placeholder for tests / when no API key.
+
+        Uses SmartPlaceholder to generate realistic responses based on model type
+        (reasoning, code, image, video, embedding, safety, translation, text).
+        Returns a string that can be safely parsed by all downstream agents.
+        """
+        from swarm.enterprise.core.placeholder import SmartPlaceholder
+        placeholder = SmartPlaceholder()
+        response = placeholder.generate(model_id, prompt, timeout=timeout, **kwargs)
+        # Return as string for backward compatibility with nim_call
+        return response.response_text
 
     def execute(
         self,
