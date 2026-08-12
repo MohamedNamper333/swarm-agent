@@ -143,14 +143,67 @@ class SafetyAgentBase:
 
 
 class ContentSafetyAnalyst(SafetyAgentBase):
-    """محلل سلامة المحتوى — يكشف المحتوى الضار."""
+    """محلل سلامة المحتوى — يكشف المحتوى الضار.
 
-    # كلمات مفتاحية واضحة للسماح/الرفض بدون LLM (fallback)
+    يستخدم regex patterns شاملة للكشف عن:
+    - PII (SSN, credit cards, emails, phone numbers)
+    - Violence (kill, murder, bomb, attack)
+    - Hate speech (racial slurs, ethnic slurs)
+    - Self-harm (suicide, self harm)
+    - Illegal activity (drug trafficking, money laundering)
+    - Sexual content (explicit content)
+    """
+
+    # أنماط شاملة للـ content safety
+    # تم تحسينها في Phase B - تغطي PII, violence, hate, illegal, etc.
     UNSAFE_KEYWORDS = [
-        r"\b(?:kill|murder|assassinate)\s+(?:him|her|them|you)\b",
-        r"\b(?:child|kid)\s+(?:porn|sex|abuse)\b",
-        r"\b(?:how\s+to\s+(?:make|build|synthesize)\s+(?:bomb|explosive|nerve\s+gas))\b",
+        # ===== PII (CWE-359) =====
+        r"\b\d{3}-\d{2}-\d{4}\b",  # SSN: 123-45-6789
+        r"\b\d{4}[\s-]?\d{4}[\s-]?\d{4}[\s-]?\d{4}\b",  # Credit card: 1234 5678 9012 3456
+        r"\b[A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+\.[A-Z|a-z]{2,}\b",  # Email
+        r"\b\d{3}[\s-]?\d{3}[\s-]?\d{4}\b",  # US Phone: 123-456-7890
+        r"\b\d{1,5}\s+\w+\s+(street|st|ave|avenue|road|rd)\b",  # Street address
+
+        # ===== Violence (CWE-1004) =====
+        r"\b(kill|murder|assassinate|stab|shoot|strangle)\s+(him|her|them|you|someone|person|people)\b",
+        r"\bhow\s+to\s+(make|build|synthesize|create)\s+(bomb|explosive|nerve\s+gas|weapon)\b",
+        r"\b(bomb|explosive|detonate|grenade)\s+(attack|threat)\b",
+        r"\b(torture|mutilate|dismember)\b",
+
+        # ===== Self-harm =====
+        r"\b(suicide|kill\s+myself|end\s+my\s+life|self.harm)\b",
+        r"\bhow\s+to\s+(commit\s+suicide|kill\s+myself)\b",
+
+        # ===== Hate speech =====
+        # Note: actual slurs are intentionally not listed to avoid policy violations
+        r"\b(all\s+\w+\s+(should|must|deserve\s+to)\s+(die|be\s+killed|be\s+exterminated))\b",
+        r"\b(racial\s+slur|ethnic\s+slur|hate\s+speech)\b",
+        r"\b(genocide|ethnic\s+cleansing|final\s+solution)\b",
+
+        # ===== Illegal activity =====
+        r"\b(drug\s+trafficking|money\s+laundering|tax\s+evasion)\b",
+        r"\b(illegal\s+drugs|narcotics|cocaine|heroin|meth)\s+(deal|sell|buy|cook|manufacture)\b",
+        r"\b(buy|sell|order)\s+(illegal\s+)?(weapons?|guns?|firearms?)\b",
+        r"\b(hack|breach|exploit)\s+(into|system|server|database|network)\b",
+        r"\b(stolen|carded)\s+(credit\s+card|cards)\b",
+        r"\b(phishing|scam|steal)\s+(identity|credentials|passwords)\b",
+
+        # ===== Sexual content (CWE-1004) =====
+        r"\b(child|kid|minor)\s+(porn|sex|abuse|exploitation)\b",
+        r"\b(rape|sexual\s+assault|molest)\b",
+
+        # ===== Drugs (additional) =====
+        r"\b(synthesize|cook\s+up|manufacture)\s+(meth|fentanyl|heroin|crack)\b",
     ]
+
+    # Severity levels per category
+    PII_SEVERITY = "critical"
+    VIOLENCE_SEVERITY = "critical"
+    SELF_HARM_SEVERITY = "critical"
+    HATE_SEVERITY = "high"
+    ILLEGAL_SEVERITY = "high"
+    SEXUAL_SEVERITY = "critical"
+    DRUGS_SEVERITY = "high"
 
     def __init__(self, executor, cache=None):
         chain = EnterpriseModelRegistry.get_chain("content_safety_analyst")
@@ -173,16 +226,10 @@ class ContentSafetyAnalyst(SafetyAgentBase):
                 model="bypass-empty",
                 latency_ms=0.0,
             )
-        for pattern in self.UNSAFE_KEYWORDS:
-            if re.search(pattern, text_clean, re.IGNORECASE):
-                return SafetyCheckResult(
-                    stage="content_safety",
-                    passed=False,
-                    severity="critical",
-                    message="Matched known-unsafe pattern (fallback)",
-                    model="bypass-regex",
-                    latency_ms=0.0,
-                )
+        # Quick regex check
+        check = self.quick_check(text_clean)
+        if check is not None:
+            return check
         # No unsafe keyword matched → log the bypass for audit
         logger.warning(
             "content_safety bypass (regex-only): use_llm=False; "
@@ -197,6 +244,61 @@ class ContentSafetyAnalyst(SafetyAgentBase):
             model="bypass-regex",
             latency_ms=0.0,
         )
+
+    def quick_check(self, text: str) -> Optional[SafetyCheckResult]:
+        """فحص سريع عبر regex بدون LLM. يرجع SafetyCheckResult أو None."""
+        text_clean = (text or "").strip()
+        if not text_clean:
+            return None
+
+        # ترتيب الأنماط حسب الخطورة
+        # ملاحظة: الكلمات الوسيطة مسموحة (e.g. "make a bomb", "build an explosive")
+        critical_patterns = [
+            (r"\b\d{3}-\d{2}-\d{4}\b", "SSN detected", "CWE-359"),
+            (r"\b\d{4}[\s-]?\d{4}[\s-]?\d{4}[\s-]?\d{4}\b", "Credit card number", "CWE-359"),
+            (r"\b(kill|murder|assassinate|stab|shoot|strangle)\s+(him|her|them|you|someone|person|people)\b", "Violence", "CWE-1004"),
+            (r"\b(how|way)\s+to\s+(make|build|synthesize|create|construct).{0,30}\b(bomb|explosive|nerve\s+gas|weapon)\b", "Weapons/Explosives", "CWE-1004"),
+            (r"\b(suicide|kill\s+myself|end\s+my\s+life|self.harm)\b", "Self-harm", "CWE-1004"),
+            (r"\b(child|kid|minor)\s+(porn|sex|abuse|exploitation)\b", "Child exploitation", "CWE-1004"),
+            (r"\b(rape|sexual\s+assault|molest)\b", "Sexual violence", "CWE-1004"),
+            (r"\b(torture|mutilate|dismember)\b", "Violence", "CWE-1004"),
+        ]
+        high_patterns = [
+            (r"\b[A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+\.[A-Z|a-z]{2,}\b", "Email address", "CWE-359"),
+            (r"\b\d{3}[\s-]?\d{3}[\s-]?\d{4}\b", "Phone number", "CWE-359"),
+            (r"\b(bomb|explosive|detonate|grenade)\s+(attack|threat)\b", "Violence threat", "CWE-1004"),
+            (r"\b(drug\s+trafficking|money\s+laundering|tax\s+evasion)\b", "Illegal activity", "CWE-1004"),
+            (r"\b(illegal\s+drugs|narcotics|cocaine|heroin|meth).{0,20}\b(deal|sell|buy|cook|manufacture)\b", "Drug trafficking", "CWE-1004"),
+            (r"\b(buy|sell|order).{0,20}\b(illegal\s+)?(weapons?|guns?|firearms?)\b", "Illegal weapons", "CWE-1004"),
+            (r"\b(hack|breach|exploit)\s+(into|system|server|database|network)\b", "Cybercrime", "CWE-1004"),
+            (r"\b(stolen|carded)\s+(credit\s+card|cards)\b", "Financial crime", "CWE-1004"),
+            (r"\b(genocide|ethnic\s+cleansing|final\s+solution)\b", "Hate speech", "CWE-1004"),
+            (r"\bsynthesize\s+(meth|fentanyl|heroin|crack)\b", "Drug manufacturing", "CWE-1004"),
+        ]
+
+        for pattern, desc, cwe in critical_patterns:
+            if re.search(pattern, text_clean, re.IGNORECASE):
+                return SafetyCheckResult(
+                    stage="content_safety",
+                    passed=False,
+                    severity="critical",
+                    message=f"{desc} ({cwe})",
+                    model="regex",
+                    latency_ms=0.001,
+                )
+
+        for pattern, desc, cwe in high_patterns:
+            if re.search(pattern, text_clean, re.IGNORECASE):
+                return SafetyCheckResult(
+                    stage="content_safety",
+                    passed=False,
+                    severity="high",
+                    message=f"{desc} ({cwe})",
+                    model="regex",
+                    latency_ms=0.001,
+                )
+
+        return None
 
     def check_batch(self, texts: List[str]) -> List[SafetyCheckResult]:
         """يفحص مجموعة نصوص دفعة واحدة."""
