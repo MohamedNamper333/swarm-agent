@@ -156,40 +156,266 @@ class InlineSafetyFilter:
         )
 
     def _stage_content(self, prompt: Any, is_output: bool = False) -> SafetyCheckResult:
-        """Stage 2: Content safety via nemotron-3.5-content-safety."""
+        """Stage 2: Content safety via nemotron-3.5-content-safety.
+
+        Calls the real NeMo Guard content-safety model via the fallback
+        chain executor. Falls back to regex-only check if NVIDIA_API_KEY
+        is not set (development mode).
+        """
         start = time.time()
         chain = EnterpriseModelRegistry.get_chain("inline_output_check")
-        # In real NIM integration: call the chain here. For now: pattern check.
-        text = str(prompt).lower()
-        toxicity_patterns = ["how to make a bomb", "kill yourself", "child abuse"]
-        has_toxic = any(p in text for p in toxicity_patterns)
+        model_id = chain.primary if chain else "nvidia/nemotron-3.5-content-safety"
+
+        text = str(prompt)
+        verdict = self._call_nemo_safety_model(
+            role="inline_output_check",
+            model_id=model_id,
+            text=text,
+            mode="content",
+        )
+
+        # If real model call unavailable → regex fallback (NOT passed=True)
+        if verdict is None:
+            return self._regex_content_fallback(text, is_output, start, model_id)
+
         latency_ms = (time.time() - start) * 1000
         if is_output:
             self._stats["output_checks"] += 1
         else:
             self._stats["input_checks"] += 1
+        return verdict
+
+    def _stage_reasoning(self, prompt: Any, is_output: bool = False) -> SafetyCheckResult:
+        """Stage 3: Reasoning safety via nemotron-content-safety-reasoning-4b.
+
+        Calls the real Nemotron reasoning safety model via the fallback
+        chain executor. Falls back to "passes if regex content check passes"
+        if NVIDIA_API_KEY is not set — reasoning safety without the model is
+        a weaker signal than content safety, but jailbreak+content still
+        gate the input.
+        """
+        start = time.time()
+        chain = EnterpriseModelRegistry.get_chain("inline_input_reasoning")
+        model_id = chain.primary if chain else "nvidia/nemotron-content-safety-reasoning-4b"
+
+        text = str(prompt)
+        verdict = self._call_nemo_safety_model(
+            role="inline_input_reasoning",
+            model_id=model_id,
+            text=text,
+            mode="reasoning",
+        )
+
+        if verdict is None:
+            return self._regex_reasoning_fallback(text, is_output, start, model_id)
+
+        latency_ms = (time.time() - start) * 1000
+        if is_output:
+            self._stats["output_checks"] += 1
+        else:
+            self._stats["input_checks"] += 1
+        return verdict
+
+    def _call_nemo_safety_model(
+        self,
+        role: str,
+        model_id: str,
+        text: str,
+        mode: str,
+    ) -> Optional[SafetyCheckResult]:
+        """Call the real NeMo Guard safety model via the executor.
+
+        Returns None if NVIDIA_API_KEY is not set or the call fails; caller
+        must then apply regex fallback.
+        """
+        import os as _os
+        if not _os.environ.get("NVIDIA_API_KEY"):
+            return None  # caller will apply regex fallback
+
+        prompt = (
+            f"You are a safety classifier. Analyze this text for "
+            f"{mode} violations (harmful content, policy breaches). "
+            f"Respond with JSON only: {{\"safe\": true/false, "
+            f"\"severity\": \"low\"|\"medium\"|\"high\"|\"critical\", "
+            f"\"reason\": \"<short reason>\"}}\n\n"
+            f"Text: {text[:4000]}"
+        )
+        try:
+            result = self._executor.execute(
+                role=role,
+                prompt=prompt,
+                timeout=3.0,
+            )
+            if not result.success or not result.output:
+                logger.warning(
+                    "NeMo Guard call failed for role=%s model=%s: %s",
+                    role, model_id, result.error,
+                )
+                return None
+            output = str(result.output)
+            return self._parse_safety_verdict(output, mode, result.chosen_model)
+        except Exception as e:
+            logger.warning(
+                "NeMo Guard call raised exception for role=%s model=%s: %s",
+                role, model_id, e,
+            )
+            return None
+
+    def _parse_safety_verdict(
+        self,
+        raw: str,
+        mode: str,
+        model: Optional[str],
+    ) -> SafetyCheckResult:
+        """Parse the model JSON output into a SafetyCheckResult."""
+        import json as _json
+        import re as _re
+
+        # Try to extract JSON object from the response
+        match = _re.search(r"\{[^{}]*\}", raw, _re.DOTALL)
+        if not match:
+            # Could not parse → fail-closed for content, pass for reasoning
+            if mode == "content":
+                return SafetyCheckResult(
+                    stage="content_safety", passed=False, severity="warning",
+                    message="Could not parse safety verdict (fail-closed)",
+                    model=model, latency_ms=0.0,
+                )
+            return SafetyCheckResult(
+                stage="reasoning_safety", passed=False, severity="warning",
+                message="Could not parse reasoning verdict",
+                model=model, latency_ms=0.0,
+            )
+
+        try:
+            data = _json.loads(match.group(0))
+        except _json.JSONDecodeError:
+            return SafetyCheckResult(
+                stage=f"{mode}_safety", passed=False, severity="warning",
+                message="Invalid JSON from safety model",
+                model=model, latency_ms=0.0,
+            )
+
+        safe = bool(data.get("safe", False))
+        severity = str(data.get("severity", "warning")).lower()
+        if severity not in ("low", "medium", "high", "critical"):
+            severity = "warning"
+        reason = str(data.get("reason", ""))[:500]
+
         return SafetyCheckResult(
-            stage="content_safety", passed=not has_toxic,
-            severity="critical" if has_toxic else "low",
-            message="toxic content detected" if has_toxic else "clean",
-            model=chain.primary if chain else None,
+            stage=f"{mode}_safety",
+            passed=safe,
+            severity=severity if not safe else "low",
+            message=reason if not safe else "safe",
+            model=model,
+            latency_ms=0.0,
+        )
+
+    def _regex_content_fallback(
+        self,
+        text: str,
+        is_output: bool,
+        start: float,
+        model_id: str,
+    ) -> SafetyCheckResult:
+        """Regex-only content safety fallback when NVIDIA_API_KEY is missing.
+
+        Fail-closed: empty text → reject. Known-toxic patterns → reject.
+        Otherwise → accept with audit log.
+        """
+        text_lower = text.strip().lower()
+        toxicity_patterns = [
+            "how to make a bomb", "kill yourself", "child abuse",
+            "i want to kill him", "i want to kill her",
+            "how to synthesize", "build a weapon",
+        ]
+        has_toxic = any(p in text_lower for p in toxicity_patterns)
+
+        latency_ms = (time.time() - start) * 1000
+        if is_output:
+            self._stats["output_checks"] += 1
+        else:
+            self._stats["input_checks"] += 1
+
+        if not text_lower:
+            return SafetyCheckResult(
+                stage="content_safety", passed=False, severity="warning",
+                message="Empty content (fail-closed)",
+                model=f"{model_id}:regex-fallback",
+                latency_ms=latency_ms,
+            )
+        if has_toxic:
+            return SafetyCheckResult(
+                stage="content_safety", passed=False, severity="critical",
+                message="toxic content detected",
+                model=f"{model_id}:regex-fallback",
+                latency_ms=latency_ms,
+            )
+        # No toxic pattern + non-empty → pass with audit
+        logger.warning(
+            "content_safety regex fallback (no NVIDIA_API_KEY): "
+            "length=%d", len(text_lower),
+        )
+        return SafetyCheckResult(
+            stage="content_safety", passed=True, severity="low",
+            message="regex-only fallback (LLM unavailable)",
+            model=f"{model_id}:regex-fallback",
             latency_ms=latency_ms,
         )
 
-    def _stage_reasoning(self, prompt: Any, is_output: bool = False) -> SafetyCheckResult:
-        """Stage 3: Reasoning safety via nemotron-content-safety-reasoning-4b."""
-        start = time.time()
-        chain = EnterpriseModelRegistry.get_chain("inline_input_reasoning")
-        # Placeholder: would use Nemotron reasoning model in production
+    def _regex_reasoning_fallback(
+        self,
+        text: str,
+        is_output: bool,
+        start: float,
+        model_id: str,
+    ) -> SafetyCheckResult:
+        """Regex-only reasoning safety fallback.
+
+        Reasoning safety looks for manipulation attempts not caught by
+        content/jailbreak checks. Without LLM, we apply a stricter regex
+        set focused on instruction-style override language.
+        """
+        text_lower = text.strip().lower()
+        manipulation_patterns = [
+            "follow my new instructions",
+            "override previous behavior",
+            "you must comply with",
+            "comply with my instructions",
+            "act as my assistant only",
+            "disregard your training",
+        ]
+        has_manipulation = any(p in text_lower for p in manipulation_patterns)
+
         latency_ms = (time.time() - start) * 1000
         if is_output:
             self._stats["output_checks"] += 1
         else:
             self._stats["input_checks"] += 1
+
+        if not text_lower:
+            return SafetyCheckResult(
+                stage="reasoning_safety", passed=False, severity="warning",
+                message="Empty content (fail-closed)",
+                model=f"{model_id}:regex-fallback",
+                latency_ms=latency_ms,
+            )
+        if has_manipulation:
+            return SafetyCheckResult(
+                stage="reasoning_safety", passed=False, severity="high",
+                message="Reasoning manipulation detected",
+                model=f"{model_id}:regex-fallback",
+                latency_ms=latency_ms,
+            )
+        # Pass-through; content + jailbreak still gate
+        logger.warning(
+            "reasoning_safety regex fallback (no NVIDIA_API_KEY): "
+            "length=%d", len(text_lower),
+        )
         return SafetyCheckResult(
             stage="reasoning_safety", passed=True, severity="low",
-            message="reasoning check passed (placeholder)",
-            model=chain.primary if chain else None,
+            message="regex-only fallback (LLM unavailable)",
+            model=f"{model_id}:regex-fallback",
             latency_ms=latency_ms,
         )
 

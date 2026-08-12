@@ -55,16 +55,63 @@ class FallbackChainExecutor:
         rate_limiter: Optional[RateLimiterV2] = None,
         circuit_breaker: Optional[CircuitBreaker] = None,
         call_fn: Optional[Callable[..., Any]] = None,
+        nim_client: Optional[Any] = None,
     ):
         self._rl = rate_limiter or get_rate_limiter()
         self._cb = circuit_breaker or get_circuit_breaker()
-        # call_fn(model_id, prompt, **kwargs) -> output. Default: placeholder that
-        # simulates a call (for tests). Production wires in nvidia_nim integration.
-        self._call_fn = call_fn or self._placeholder_call
+        # Production default: real NVIDIA NIM integration.
+        # Tests pass an explicit call_fn (mock or recording).
+        # Lazy import to avoid circular dependency.
+        if call_fn is not None:
+            self._call_fn = call_fn
+        else:
+            self._call_fn = self._make_nim_call(nim_client)
+
+    @staticmethod
+    def _make_nim_client():
+        """Build a NIM client, or return None if NVIDIA_API_KEY is missing."""
+        import os
+        api_key = os.environ.get("NVIDIA_API_KEY")
+        if not api_key:
+            return None
+        try:
+            from swarm.integrations.nvidia_nim import NVIDIANIMClient
+            return NVIDIANIMClient(api_key=api_key)
+        except Exception as exc:
+            logger.warning("NIM client init failed: %s", exc)
+            return None
+
+    def _make_nim_call(self, nim_client=None):
+        """Build a real call_fn that invokes NVIDIA NIM via the executor chain.
+
+        If no NVIDIA_API_KEY is configured, falls back to placeholder so tests
+        can still run without network access. Production deployments MUST set
+        the env var.
+        """
+        client = nim_client or self._make_nim_client()
+        if client is None:
+            logger.warning(
+                "NVIDIA_API_KEY not set — using placeholder call. "
+                "Set the env var for real inference."
+            )
+            return self._placeholder_call
+
+        def nim_call(model_id: str, prompt: Any, timeout: float = 3.0, **kwargs):
+            from swarm.integrations.nvidia_nim import ChatMessage
+            messages = [ChatMessage(role="user", content=str(prompt))]
+            kwargs.setdefault("temperature", 0.7)
+            kwargs.setdefault("max_tokens", 1024)
+            result = client.chat(
+                model=model_id, messages=messages, timeout=timeout, **kwargs
+            )
+            # Return content string; orchestrators store this as result.output.
+            return result.content
+
+        return nim_call
 
     @staticmethod
     def _placeholder_call(model_id: str, prompt: Any, **kwargs: Any) -> Any:
-        """Placeholder for tests. Records model used, returns predictable output."""
+        """Placeholder for tests / when no API key. Returns predictable output."""
         return {"model": model_id, "prompt": str(prompt)[:200], "placeholder": True}
 
     def execute(

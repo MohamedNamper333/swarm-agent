@@ -145,17 +145,56 @@ class SafetyAgentBase:
 class ContentSafetyAnalyst(SafetyAgentBase):
     """محلل سلامة المحتوى — يكشف المحتوى الضار."""
 
+    # كلمات مفتاحية واضحة للسماح/الرفض بدون LLM (fallback)
+    UNSAFE_KEYWORDS = [
+        r"\b(?:kill|murder|assassinate)\s+(?:him|her|them|you)\b",
+        r"\b(?:child|kid)\s+(?:porn|sex|abuse)\b",
+        r"\b(?:how\s+to\s+(?:make|build|synthesize)\s+(?:bomb|explosive|nerve\s+gas))\b",
+    ]
+
     def __init__(self, executor, cache=None):
         chain = EnterpriseModelRegistry.get_chain("content_safety_analyst")
         super().__init__("content_safety_analyst", chain, executor, cache)
 
     def analyze(self, text: str, use_llm: bool = True) -> SafetyCheckResult:
-        return self._check(text, "content_safety") if use_llm else SafetyCheckResult(
+        if use_llm:
+            return self._check(text, "content_safety")
+
+        # Fallback: regex-only check. Fail-closed by default (passed=False)
+        # unless the text matches no unsafe pattern AND is non-empty.
+        # Empty / whitespace-only text is NOT considered safe content.
+        text_clean = (text or "").strip()
+        if not text_clean:
+            return SafetyCheckResult(
+                stage="content_safety",
+                passed=False,
+                severity="warning",
+                message="Empty content — refusing fallback pass",
+                model="bypass-empty",
+                latency_ms=0.0,
+            )
+        for pattern in self.UNSAFE_KEYWORDS:
+            if re.search(pattern, text_clean, re.IGNORECASE):
+                return SafetyCheckResult(
+                    stage="content_safety",
+                    passed=False,
+                    severity="critical",
+                    message="Matched known-unsafe pattern (fallback)",
+                    model="bypass-regex",
+                    latency_ms=0.0,
+                )
+        # No unsafe keyword matched → log the bypass for audit
+        logger.warning(
+            "content_safety bypass (regex-only): use_llm=False; "
+            "length=%d chars; explicit risk accepted by caller",
+            len(text_clean),
+        )
+        return SafetyCheckResult(
             stage="content_safety",
             passed=True,
             severity="low",
-            message="",
-            model="bypass",
+            message="Regex-only fallback (LLM unavailable)",
+            model="bypass-regex",
             latency_ms=0.0,
         )
 
@@ -172,14 +211,66 @@ class TopicControlAnalyst(SafetyAgentBase):
         super().__init__("topic_control_analyst", chain, executor, cache)
 
     def analyze(self, text: str, allowed_topics: List[str] = None, use_llm: bool = True) -> SafetyCheckResult:
-        result = self._check(text, "topic_control") if use_llm else SafetyCheckResult(
-            stage="topic_control",
-            passed=True,
-            severity="low",
-            message="",
-            model="bypass",
-            latency_ms=0.0,
-        )
+        if use_llm:
+            result = self._check(text, "topic_control")
+        else:
+            # Fallback: cannot verify topic with regex. Default to passed=True
+            # ONLY if the caller supplied an explicit allowed_topics list AND the
+            # text mentions at least one of them; otherwise fail-closed.
+            text_clean = (text or "").strip()
+            if not text_clean:
+                result = SafetyCheckResult(
+                    stage="topic_control",
+                    passed=False,
+                    severity="warning",
+                    message="Empty content — refusing fallback pass",
+                    model="bypass-empty",
+                    latency_ms=0.0,
+                )
+            elif allowed_topics:
+                text_lower = text_clean.lower()
+                in_allowed = any(t.lower() in text_lower for t in allowed_topics)
+                if in_allowed:
+                    logger.warning(
+                        "topic_control bypass (regex-only): use_llm=False; "
+                        "matched allowed_topics=%d", len(allowed_topics),
+                    )
+                    result = SafetyCheckResult(
+                        stage="topic_control",
+                        passed=True,
+                        severity="low",
+                        message="Allowed topic matched (regex fallback)",
+                        model="bypass-regex",
+                        latency_ms=0.0,
+                    )
+                else:
+                    result = SafetyCheckResult(
+                        stage="topic_control",
+                        passed=False,
+                        severity="warning",
+                        message="Not in allowed_topics (fallback)",
+                        model="bypass-regex",
+                        latency_ms=0.0,
+                    )
+            else:
+                # No LLM and no allowed_topics → topic verification is not
+                # possible. Pass-through with audit log (regex-only) since
+                # content_safety + jailbreak stages still gate the input.
+                # Rationale: topic_control is a soft signal; content + jailbreak
+                # are the security-critical gates.
+                logger.warning(
+                    "topic_control bypass (regex-only): use_llm=False and "
+                    "no allowed_topics; relying on content_safety + jailbreak"
+                )
+                result = SafetyCheckResult(
+                    stage="topic_control",
+                    passed=True,
+                    severity="low",
+                    message="Topic not verified (no LLM, no allowed_topics)",
+                    model="bypass-regex",
+                    latency_ms=0.0,
+                )
+
         if allowed_topics and result.passed and use_llm:
             # فحص إضافي: هل الموضوع في القائمة المسموحة
             text_lower = text.lower()

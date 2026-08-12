@@ -354,28 +354,33 @@ class AuthManager:
 
 
 # FastAPI Dependency
-async def get_current_user(
-    request: Request,
-    auth_manager: "AuthManager" = None
-) -> Dict[str, Any]:
-    """FastAPI dependency to get current user from Authorization header"""
-    if auth_manager is None:
-        auth_manager = get_auth_manager()
-    
+async def get_current_user(request: Request) -> Dict[str, Any]:
+    """FastAPI dependency to get current user from Authorization header."""
+    auth_manager = get_auth_manager()
+
     auth_header = request.headers.get("Authorization")
     if not auth_header:
         raise HTTPException(401, "Authorization header required")
-    
+
     parts = auth_header.split()
     if len(parts) != 2:
         raise HTTPException(401, "Invalid Authorization header format")
-    
+
     scheme, token = parts
     if scheme.lower() == "bearer":
+        # Try JWT first; fall back to API key (Bearer is the conventional
+        # scheme for both, and `sk-...` API keys are also Bearer tokens).
         payload = auth_manager.validate_access_token(token)
-        if not payload:
-            raise HTTPException(401, "Invalid or expired token")
-        return payload
+        if payload:
+            return payload
+        api_key = auth_manager.validate_api_key(token)
+        if api_key:
+            return {
+                "sub": api_key.id,
+                "scopes": api_key.scopes,
+                "type": "api_key",
+            }
+        raise HTTPException(401, "Invalid or expired token")
     elif scheme.lower() == "apikey":
         api_key = auth_manager.validate_api_key(token)
         if not api_key:
@@ -390,8 +395,10 @@ async def get_current_user(
 
 
 def require_scopes(*required_scopes: str):
-    """FastAPI dependency to require specific scopes"""
-    async def scope_checker(current_user: Dict = Depends(get_current_user)):
+    """FastAPI dependency factory to require specific scopes."""
+    async def scope_checker(
+        current_user: Dict = Depends(get_current_user),
+    ):
         auth_manager = get_auth_manager()
         if not auth_manager.require_scopes(current_user, list(required_scopes)):
             raise HTTPException(403, f"Required scopes: {required_scopes}")

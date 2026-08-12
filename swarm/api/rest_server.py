@@ -23,6 +23,7 @@ from contextlib import asynccontextmanager
 
 from swarm.resilience.task_queue import TaskQueue
 from swarm.core.agent_state_machine import AgentState as ASState
+from swarm.api.auth import get_auth_manager, require_scopes
 
 logger = logging.getLogger(__name__)
 
@@ -605,11 +606,28 @@ async def metrics_json():
 
 # ========== Enterprise: VETO & Budget ==========
 
+def _validate_agent_id(agent_id: str) -> str:
+    """Validate agent_id to prevent path traversal and injection.
+
+    agent_id must be alphanumeric + hyphens/underscores, max 128 chars.
+    """
+    if not agent_id or len(agent_id) > 128:
+        raise HTTPException(400, "agent_id must be 1-128 chars")
+    if not all(c.isalnum() or c in "-_." for c in agent_id):
+        raise HTTPException(
+            400, "agent_id may only contain letters, digits, '-', '_', '.'"
+        )
+    return agent_id
+
+
 class VetoRequest(BaseModel):
-    agent_id: str
-    vetoed_by: str
-    category: str
-    reason: str
+    agent_id: str = Field(..., min_length=1, max_length=128,
+                          pattern=r"^[A-Za-z0-9._-]+$")
+    vetoed_by: str = Field(..., min_length=1, max_length=128,
+                           pattern=r"^[A-Za-z0-9._@-]+$")
+    category: str = Field(..., min_length=1, max_length=64,
+                          pattern=r"^[A-Za-z0-9_-]+$")
+    reason: str = Field(..., min_length=1, max_length=500)
     context: Optional[Dict[str, Any]] = None
 
 
@@ -621,9 +639,11 @@ class VetoResponse(BaseModel):
 
 
 class VetoOverrideRequest(BaseModel):
-    agent_id: str
-    override_by: str
-    reason: str
+    agent_id: str = Field(..., min_length=1, max_length=128,
+                          pattern=r"^[A-Za-z0-9._-]+$")
+    override_by: str = Field(..., min_length=1, max_length=128,
+                             pattern=r"^[A-Za-z0-9._@-]+$")
+    reason: str = Field(..., min_length=1, max_length=500)
 
 
 class VetoOverrideResponse(BaseModel):
@@ -642,10 +662,18 @@ def register_enterprise_sm(agent_id: str, sm) -> None:
 
 
 @app.post("/veto", response_model=VetoResponse)
-async def apply_veto(request: VetoRequest):
-    """Apply absolute VETO to an agent (ethics/safety override)."""
+async def apply_veto(
+    request: VetoRequest,
+    user: Dict[str, Any] = Depends(require_scopes("agents:write")),
+):
+    """Apply absolute VETO to an agent (ethics/safety override).
+
+    Requires agents:write scope. ADMIN scope implicitly grants this
+    via the auth manager's scope hierarchy.
+    """
     from swarm.core.agent_state_machine import AgentStateMachine
 
+    _validate_agent_id(request.agent_id)
     sm = _enterprise_state_machines.get(request.agent_id)
     if not sm:
         # إنشاء واحدة جديدة للاختبار
@@ -672,8 +700,15 @@ async def apply_veto(request: VetoRequest):
 
 
 @app.post("/veto/override", response_model=VetoOverrideResponse)
-async def override_veto(request: VetoOverrideRequest):
-    """Manually override VETO (requires authorization)."""
+async def override_veto(
+    request: VetoOverrideRequest,
+    user: Dict[str, Any] = Depends(require_scopes("admin")),
+):
+    """Manually override VETO and return agent to IDLE.
+
+    Requires ADMIN scope only — VETO override is a privileged operation.
+    """
+    _validate_agent_id(request.agent_id)
     sm = _enterprise_state_machines.get(request.agent_id)
     if not sm:
         return VetoOverrideResponse(
@@ -681,9 +716,15 @@ async def override_veto(request: VetoOverrideRequest):
             overridden=False,
             error="Agent not found or not VETOED",
         )
+    # Record who actually authorized this via the auth header.
+    authorized_by = user.get("sub", "unknown")
+    audit_reason = (
+        f"[auth={authorized_by}] override_by={request.override_by}: "
+        f"{request.reason}"
+    )
     success = sm.override_veto(
-        override_by=request.override_by,
-        reason=request.reason,
+        override_by=authorized_by,
+        reason=audit_reason,
     )
     return VetoOverrideResponse(
         agent_id=request.agent_id,
@@ -693,8 +734,14 @@ async def override_veto(request: VetoOverrideRequest):
 
 
 @app.get("/veto/{agent_id}")
-async def get_veto_status(agent_id: str):
-    """Get VETO status of an agent."""
+async def get_veto_status(
+    agent_id: str,
+    user: Dict[str, Any] = Depends(require_scopes("agents:read")),
+):
+    """Get VETO status of an agent.
+
+    Requires agents:read scope. ADMIN scope implicitly grants this.
+    """
     sm = _enterprise_state_machines.get(agent_id)
     if not sm:
         raise HTTPException(404, f"Agent {agent_id} not registered")
@@ -708,8 +755,13 @@ async def get_veto_status(agent_id: str):
 
 
 @app.get("/veto")
-async def list_vetoed_agents():
-    """List all currently VETOED agents."""
+async def list_vetoed_agents(
+    user: Dict[str, Any] = Depends(require_scopes("agents:read")),
+):
+    """List all currently VETOED agents.
+
+    Requires agents:read scope. ADMIN scope implicitly grants this.
+    """
     vetoed = []
     for agent_id, sm in _enterprise_state_machines.items():
         if sm.state.name == "VETOED":
