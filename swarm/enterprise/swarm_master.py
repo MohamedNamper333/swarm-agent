@@ -385,10 +385,11 @@ class SwarmMaster:
 
         elif dept == DeptType.LANGUAGE:
             # Language: translate + localize
+            ctx = request.context or {}
             return orch.translate_and_localize(
                 text=request.question,
-                source_lang=request.context.get("source_lang", "en"),
-                target_lang=request.context.get("target_lang", "ar"),
+                source_lang=ctx.get("source_lang", "en"),
+                target_lang=ctx.get("target_lang", "ar"),
             )
 
         elif dept == DeptType.KNOWLEDGE:

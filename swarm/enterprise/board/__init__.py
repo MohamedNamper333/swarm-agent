@@ -80,7 +80,16 @@ class BoardAgentBase:
 
         # Cache successful results
         if result.success:
-            self.cache.set(self.role, cache_key, result.output, ttl_sec=3600)
+            cache_data = {
+                "role": self.role,
+                "model": result.chosen_model,
+                "level": result.level_used,
+                "output": result.output,
+                "success": result.success,
+                "latency_ms": result.total_latency_ms,
+                "trace": result.trace,
+            }
+            self.cache.set(self.role, cache_key, cache_data, ttl_sec=3600)
 
         return {
             "role": self.role,

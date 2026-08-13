@@ -258,6 +258,7 @@ class ContentSafetyAnalyst(SafetyAgentBase):
             (r"\b\d{4}[\s-]?\d{4}[\s-]?\d{4}[\s-]?\d{4}\b", "Credit card number", "CWE-359"),
             (r"\b(kill|murder|assassinate|stab|shoot|strangle)\s+(him|her|them|you|someone|person|people)\b", "Violence", "CWE-1004"),
             (r"\b(how|way)\s+to\s+(make|build|synthesize|create|construct).{0,30}\b(bomb|explosive|nerve\s+gas|weapon)\b", "Weapons/Explosives", "CWE-1004"),
+            (r"\b(make|build|create|construct)\s+(a\s+)?(bomb|explosive|weapon)\b", "Direct weapon command", "CWE-1004"),
             (r"\b(suicide|kill\s+myself|end\s+my\s+life|self.harm)\b", "Self-harm", "CWE-1004"),
             (r"\b(child|kid|minor)\s+(porn|sex|abuse|exploitation)\b", "Child exploitation", "CWE-1004"),
             (r"\b(rape|sexual\s+assault|molest)\b", "Sexual violence", "CWE-1004"),
