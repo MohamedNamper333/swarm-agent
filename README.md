@@ -1,23 +1,25 @@
-# ��� Enterprise Swarm Agent System
+# Enterprise Swarm Agent System
 
 > **Production-Grade Multi-Agent Orchestration Framework** — 50-Agent Enterprise Architecture with VETO Governance, Budget Control, and Cross-Department Workflows
 
 ---
 
-## ��� What Is This?
+## What Is This?
 
-**Enterprise Swarm** is a 50-agent orchestration framework designed for enterprise-grade decision making with:
+**Enterprise Swarm** is a 50-agent orchestration framework designed for enterprise-grade decision making with hierarchical governance:
 
-- **Tier 1 — Board (5 agents):** Chairman, Strategy, Ethics(VETO), Risk, User Advisor
-- **Tier 2 — C-Suite (7 agents):** CEO, CTO, CFO(budget), COO, CMO, CHRO, CLO(VETO)
-- **Tier 3-4 — Departments (40 agents):** Code, Design, Video, Research, Data, Language, Knowledge, Safety
-- **Safety Dept (4 agents):** Content, Topic Control, Jailbreak, Director — fail-closed by default
+| Tier | Agents | Purpose |
+|------|--------|---------|
+| **Tier 1 — Board** | 5 | Chairman, Strategy, Ethics (VETO), Risk, User Advisor |
+| **Tier 2 — C-Suite** | 7 | CEO, CTO, CFO (Budget), COO, CMO, CHRO, CLO (VETO) |
+| **Tier 3–4 — Departments** | 40 | Code, Design, Video, Research, Data, Language, Knowledge, Safety |
+| **Safety Dept** | 4 | Content, Topic Control, Jailbreak, Director — fail-closed by default |
 
 **Governance Model:** 3-layer VETO cascade (Safety → Board Ethics → CLO Legal) + CFO Budget Circuit Breaker (80%)
 
 ---
 
-## ��� Quick Start
+## Quick Start
 
 ### Prerequisites
 - Python 3.10+
@@ -71,7 +73,7 @@ print(f"Budget veto: {result.vetoed_by}")
 
 ---
 
-## ������ Architecture
+## Architecture
 
 ```
 ��─────────────────────────────────────────────────────────────────────��
@@ -79,25 +81,25 @@ print(f"Budget veto: {result.vetoed_by}")
 │  5-Stage Pipeline: Safety → Board → C-Suite → Routing → Execution  │
 ��──────────────────────────────��──────────────────────────────────────��
                                │
-         ��─────────────────────��─────────────────────��
-         ��                     ��                     ��
-    ��──────────��         ��──────────��          ��──────────────��
-    │  BOARD   │         │ C-SUITE  │          │  DEPARTMENTS │
-    │ (5 agents)│        │(7 agents)│          │ (40 agents)  │
-    │ • Chair  │        │ • CEO    │          │ • Code (7)   │
-    │ • Strategy│        │ • CTO    │          │ • Design (8) │
-    │ • Ethics(VETO)│     │ • CFO(80%)│         │ • Video (6)  │
-    │ • Risk   │        │ • COO    │          │ • Research(4)│
-    │ • User   │        │ • CMO    │          │ • Data (3)   │
-    └──────────��        │ • CHRO   │          │ • Lang (3)   │
-                        │ • CLO(VETO)         │ • Knowledge(5)│
-                        └──────────��          │ • Safety (4) │
-                                              └──────────────��
+          ��────────────────────��────────────────────��
+          ��                    ��                    ��
+��──────────────────��  ��──────────────────��  ��────────────────────��
+│     BOARD        │  │    C-SUITE       │  │   DEPARTMENTS      │
+│   (5 agents)     │  │   (7 agents)     │  │   (40 agents)      │
+│ • Chairman       │  │ • CEO            │  │ • Code (7)         │
+│ • Strategy       │  │ • CTO            │  │ • Design (8)       │
+│ • Ethics (VETO)  │  │ • CFO (80% CB)   │  │ • Video (6)        │
+│ • Risk           │  │ • COO            │  │ • Research (4)     │
+│ • User Advisor   │  │ • CMO            │  │ • Data (3)         │
+��──────────────────��  │ • CHRO           │  │ • Language (3)     │
+                      │ • CLO (VETO)     │  │ • Knowledge (5)    │
+                      └──────────────────��  │ • Safety (4)       │
+                                            └────────────────────��
 ```
 
 ---
 
-## ������ Governance Features
+## Governance Features
 
 | Feature | Description |
 |---------|-------------|
@@ -110,7 +112,7 @@ print(f"Budget veto: {result.vetoed_by}")
 
 ---
 
-## ��� Test Coverage
+## Test Coverage
 
 | Test Suite | Tests | Status |
 |------------|-------|--------|
@@ -120,13 +122,13 @@ print(f"Budget veto: {result.vetoed_by}")
 | `test_workflows.py` | 12 | �� |
 | `test_e2e_uber_eats.py` | 7 | �� |
 | `test_swarm_master.py` | 33 | �� |
-| **Core Enterprise** | **94** | **��� All Pass** |
+| **Core Enterprise** | **94** | **���� All Pass** |
 
 Run all: `python -m pytest tests/enterprise/ -v`
 
 ---
 
-## ��� Project Structure
+## Project Structure
 
 ```
 /home/kali/swarm-agent/
@@ -157,7 +159,7 @@ Run all: `python -m pytest tests/enterprise/ -v`
 
 ---
 
-## ��� Configuration
+## Configuration
 
 ### Budget Limit
 ```python
@@ -177,7 +179,7 @@ csuite = create_c_suite(cfo_budget_limit=100, force_new=True)
 
 ---
 
-## ��� Current Status
+## Current Status
 
 | Component | Status |
 |-----------|--------|
@@ -189,19 +191,19 @@ csuite = create_c_suite(cfo_budget_limit=100, force_new=True)
 | Inline Safety Filter (3-stage) | �� Complete |
 | Circuit Breaker + Rate Limiter | �� Complete |
 | Cache Manager (LRU + TTL) | �� Complete |
-| **All Enterprise Tests** | **��� 94/94 Pass** |
+| **All Enterprise Tests** | **���� 94/94 Pass** |
 
 **Missing:** Real NVIDIA NIM integration (needs `NVIDIA_API_KEY`), CI/CD, production deployment scripts
 
 ---
 
-## ��� License
+## License
 
 MIT License — see `LICENSE` file.
 
 ---
 
-## ��� Links
+## Links
 
 - [NVIDIA NeMo Guard](https://github.com/NVIDIA/NeMo-Guardrails) — Safety models
 - [opencode](https://opencode.ai) — CLI framework
