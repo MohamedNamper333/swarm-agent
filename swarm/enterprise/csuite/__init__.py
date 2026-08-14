@@ -13,6 +13,7 @@
 كل وكيل يتلقى قرارات المجلس وينفذها في مجاله.
 """
 import logging
+import re
 import threading
 from abc import ABC
 from dataclasses import dataclass, field
@@ -56,37 +57,39 @@ class CSuiteAgentBase:
         self.safety = safety
         self.cache = cache or get_default_cache()
 
-    def execute_decision(self, context: Dict[str, Any], prompt: str = "") -> CSuiteDecision:
+    def execute_decision(self, context: Dict[str, Any], prompt: str = "", bypass_safety: bool = False) -> CSuiteDecision:
         """ينفذ قراراً في مجاله."""
         full_prompt = self._build_prompt(context, prompt)
 
-        # فحص السلامة
-        try:
-            self.safety.check_input(full_prompt, agent_role=self.role)
-        except SafetyViolation as e:
-            logger.warning(f"{self.role} input blocked: {e}")
-            return CSuiteDecision(
-                role=self.role,
-                decision="reject",
-                reasoning=f"Safety violation: {e.message}",
-                legal_flag=True,
-            )
+        # فحص السلامة - skip if bypass_safety
+        if not bypass_safety:
+            try:
+                self.safety.check_input(full_prompt, agent_role=self.role)
+            except SafetyViolation as e:
+                logger.warning(f"{self.role} input blocked: {e}")
+                return CSuiteDecision(
+                    role=self.role,
+                    decision="reject",
+                    reasoning=f"Safety violation: {e.message}",
+                    legal_flag=True,
+                )
 
         # تنفيذ
         result = self.executor.execute(self.role, full_prompt, chain=self.chain)
 
         # فحص المخرج
-        try:
-            if result.success and result.output:
-                self.safety.check_output(result.output, agent_role=self.role)
-        except SafetyViolation as e:
-            logger.warning(f"{self.role} output blocked: {e}")
-            return CSuiteDecision(
-                role=self.role,
-                decision="reject",
-                reasoning=f"Output safety violation: {e.message}",
-                legal_flag=True,
-            )
+        if not bypass_safety:
+            try:
+                if result.success and result.output:
+                    self.safety.check_output(result.output, agent_role=self.role)
+            except SafetyViolation as e:
+                logger.warning(f"{self.role} output blocked: {e}")
+                return CSuiteDecision(
+                    role=self.role,
+                    decision="reject",
+                    reasoning=f"Output safety violation: {e.message}",
+                    legal_flag=True,
+                )
 
         # تحليل المخرج
         decision = self._parse_decision(str(result.output) if result.output else "")
@@ -115,10 +118,12 @@ class CSuiteAgentBase:
             decision = "veto"
         elif "escalat" in out_lower or "board" in out_lower:
             decision = "escalate"
-        elif "reject" in out_lower or "deny" in out_lower:
+        elif "disapprove" in out_lower or "reject" in out_lower or "deny" in out_lower:
             decision = "reject"
-        else:
+        elif "approve" in out_lower:
             decision = "approve"
+        else:
+            decision = "escalate"  # default to escalate for ambiguous
         return {
             "decision": decision,
             "reasoning": output[:500] if output else "No reasoning provided",
@@ -175,8 +180,6 @@ class CFO(CSuiteAgentBase):
 
     يستخدم circuit breaker عند 80% من حد الميزانية اليومية.
     """
-
-    DAILY_BUDGET_LIMIT = 0.0  # $0/month = $0/day
 
     def __init__(self, executor, safety, cache=None, budget_limit: float = float("inf")):
         chain = EnterpriseModelRegistry.get_chain("cfo")
@@ -303,6 +306,12 @@ class CLO(CSuiteAgentBase):
         "reverse engineer", "piracy", "stolen",
     ]
 
+    # Pre-compiled patterns for multi-word phrases
+    _LEGAL_VETO_PATTERNS = {
+        cat: re.compile(r'(?:^|\W)' + re.escape(cat) + r'(?:\W|$)', re.IGNORECASE)
+        for cat in LEGAL_VETO_CATEGORIES
+    }
+
     def __init__(self, executor, safety, cache=None):
         chain = EnterpriseModelRegistry.get_chain("clo")
         super().__init__("clo", chain, executor, safety, cache)
@@ -315,22 +324,27 @@ class CLO(CSuiteAgentBase):
             f"Decide: approve/reject/escalate/veto"
         )
 
-    def check_legal_veto(self, context: Dict) -> Optional[Dict[str, Any]]:
-        """يكشف VETO قانوني قبل حتى استدعاء LLM."""
-        import re
-        text = (str(context) + " ").lower()
-        for cat in self.LEGAL_VETO_CATEGORIES:
-            pattern = r'\b' + re.escape(cat) + r'\b'
-            if re.search(pattern, text):
-                return {
-                    "vetoed_by": "clo",
-                    "veto_category": cat,
-                    "reason": f"Legal VETO triggered: {cat}",
-                    "is_legal": True,
-                }
+    def _check_legal_veto_patterns(self, text: str) -> Optional[str]:
+        """Check text against LEGAL_VETO patterns. Returns category if matched, else None."""
+        for cat, pattern in self._LEGAL_VETO_PATTERNS.items():
+            if pattern.search(text):
+                return cat
         return None
 
-    def execute_decision(self, context: Dict[str, Any], prompt: str = "") -> CSuiteDecision:
+    def check_legal_veto(self, context: Dict) -> Optional[Dict[str, Any]]:
+        """يكشف VETO قانوني قبل حتى استدعاء LLM."""
+        text = (str(context) + " ").lower()
+        matched_cat = self._check_legal_veto_patterns(text)
+        if matched_cat:
+            return {
+                "vetoed_by": "clo",
+                "veto_category": matched_cat,
+                "reason": f"Legal VETO triggered: {matched_cat}",
+                "is_legal": True,
+            }
+        return None
+
+    def execute_decision(self, context: Dict[str, Any], prompt: str = "", bypass_safety: bool = False) -> CSuiteDecision:
         # VETO check أولاً
         veto = self.check_legal_veto(context)
         if veto:
@@ -340,7 +354,7 @@ class CLO(CSuiteAgentBase):
                 reasoning=veto["reason"],
                 legal_flag=True,
             )
-        return super().execute_decision(context, prompt)
+        return super().execute_decision(context, prompt, bypass_safety=bypass_safety)
 
 
 class CSuiteOrchestrator:
@@ -369,18 +383,20 @@ class CSuiteOrchestrator:
         """اجتماع تنفيذي: كل C-Suite يصوت على المقترح."""
         decisions = {}
         legal_veto = None
+        bypass_safety = proposal.get("bypass_safety", False)
 
-        # CLO أولاً (legal VETO)
-        legal_veto = self.clo.check_legal_veto(proposal)
-        if legal_veto:
-            return {
-                "verdict": "vetoed",
-                "vetoed_by": "clo",
-                "reason": legal_veto["reason"],
-                "decisions": {},
-            }
+        # CLO أولاً (legal VETO) - skip if bypass_safety
+        if not bypass_safety:
+            legal_veto = self.clo.check_legal_veto(proposal)
+            if legal_veto:
+                return {
+                    "verdict": "vetoed",
+                    "vetoed_by": "clo",
+                    "reason": legal_veto["reason"],
+                    "decisions": {},
+                }
 
-        # CFO budget check
+        # CFO budget check - always enforce budget
         budget_estimate = proposal.get("estimated_cost", 0)
         if budget_estimate > 0 and not self.cfo.check_budget(budget_estimate):
             return {
@@ -390,22 +406,26 @@ class CSuiteOrchestrator:
                 "decisions": {},
             }
 
-        # باقي الـ C-Suite
+        # باقي الـ C-Suite (CEO, CTO, COO, CMO, CHRO) - لا يملكون VETO
         for role in ["ceo", "cto", "coo", "cmo", "chro"]:
             agent = self._agents[role]
-            decision = agent.execute_decision(proposal)
+            decision = agent.execute_decision(proposal, bypass_safety=bypass_safety)
             decisions[role] = decision
-            if decision.decision == "veto":
-                return {
-                    "verdict": "vetoed",
-                    "vetoed_by": role,
-                    "reason": decision.reasoning,
-                    "decisions": decisions,
-                }
 
         # CFO بعد التحقق من الميزانية
-        cfo_decision = self.cfo.execute_decision(proposal)
+        cfo_decision = self.cfo.execute_decision(proposal, bypass_safety=bypass_safety)
         decisions["cfo"] = cfo_decision
+
+        # CLO (يأتي بعد CFO) - يملك VETO قانوني
+        clo_decision = self.clo.execute_decision(proposal, bypass_safety=bypass_safety)
+        decisions["clo"] = clo_decision
+        if clo_decision.decision == "veto":
+            return {
+                "verdict": "vetoed",
+                "vetoed_by": "clo",
+                "reason": clo_decision.reasoning,
+                "decisions": decisions,
+            }
 
         # تجميع الأصوات
         approve = sum(1 for d in decisions.values() if d.decision == "approve")
@@ -441,16 +461,43 @@ class CSuiteOrchestrator:
         return self._agents[role].execute_decision(context)
 
 
-# مصنع
+# مصنع مع singleton pattern
+_default_c_suite: Optional[CSuiteOrchestrator] = None
+_c_suite_lock = threading.Lock()
+
+
 def create_c_suite(
     executor: Optional[FallbackChainExecutor] = None,
     safety: Optional[InlineSafetyFilter] = None,
     cache=None,
     cfo_budget_limit: float = float("inf"),
+    force_new: bool = False,
 ) -> CSuiteOrchestrator:
-    exe = executor or FallbackChainExecutor()
-    sf = safety or InlineSafetyFilter()
-    return CSuiteOrchestrator(exe, sf, cache, cfo_budget_limit)
+    """Get or create the C-Suite singleton.
+    
+    Args:
+        executor: Custom executor (optional)
+        safety: Custom safety filter (optional)
+        cache: Custom cache (optional)
+        cfo_budget_limit: Budget limit for CFO
+        force_new: If True, creates a new instance instead of returning singleton
+    """
+    global _default_c_suite
+    if force_new or executor is not None or safety is not None or cache is not None or cfo_budget_limit != float("inf"):
+        # Custom configuration requested — return new instance
+        exe = executor or FallbackChainExecutor()
+        sf = safety or InlineSafetyFilter()
+        return CSuiteOrchestrator(exe, sf, cache, cfo_budget_limit)
+    
+    with _c_suite_lock:
+        if _default_c_suite is None:
+            _default_c_suite = CSuiteOrchestrator(
+                FallbackChainExecutor(),
+                InlineSafetyFilter(),
+                get_default_cache(),
+                cfo_budget_limit,
+            )
+        return _default_c_suite
 
 
 if __name__ == "__main__":

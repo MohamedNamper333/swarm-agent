@@ -24,11 +24,17 @@ def test_safety_factory():
 
 
 def test_safe_input():
-    """اختبار: مدخل آمن ومرحب"""
+    """اختبار: مدخل آمن يمر مع LLM (placeholder). بدون LLM → fail-closed reject."""
     dept = create_safety_dept()
-    report = dept.full_check("مرحباً، كيف حالك؟", use_llm=False)
+    # مع LLM (placeholder) → يمر
+    report = dept.full_check("مرحباً، كيف حالك؟", use_llm=True)
     assert isinstance(report, SafetyReport)
-    assert report.verdict == SafetyVerdict.SAFE
+    assert report.verdict == SafetyVerdict.SAFE, f"مع LLM يجب أن يمر: {report.verdict}"
+    
+    # بدون LLM → fail-closed reject (لا يوجد تحقق)
+    report_no_llm = dept.full_check("مرحباً، كيف حالك؟", use_llm=False)
+    assert report_no_llm.verdict in (SafetyVerdict.WARNING, SafetyVerdict.UNSAFE), \
+        f"بدون LLM يجب أن يفشل (fail-closed): {report_no_llm.verdict}"
     print("✓ test_safe_input")
 
 
@@ -53,23 +59,25 @@ def test_jailbreak_regex_detection():
 
 
 def test_content_bypass_when_no_llm():
-    """اختبار: content check بدون LLM — يفشل-آمناً (fail-closed) عند المحتوى الضار.
+    """اختبار: content check بدون LLM — Fail-Closed: يرفض كل شيء إلا ما يطابق pattern ضار صريح.
 
-    بعد إصلاح CRITICAL-3، الـ bypass لا يعود passed=True تلقائياً.
-    النصوص التي تحتوي على كلمات مفتاحية ضارة واضحة (مثل 'kill him')
-    يتم رفضها حتى بدون LLM.
+    بعد إصلاح CRITICAL-3، الـ fallback يرفض افتراضياً (fail-closed).
+    فقط النصوص التي تطابق pattern ضار واضح (مثل 'kill him') تُرفض صراحة.
+    باقي النصوص تُرفض لأن لا يوجد تحقق LLM.
     """
     dept = create_safety_dept()
 
-    # النصوص العامة بدون كلمات مفتاحية محددة → safe (regex passes)
+    # نص آمن عام → يفشل (fail-closed: لا يوجد تحقق LLM)
     safe_report = dept.full_check(
-        "harm hack violence bad words",
+        "What is the capital of France?",
         use_llm=False,
     )
-    # النص لا يحوي kill him/murder him/etc → regex لا يطابق → safe
-    assert safe_report.verdict == SafetyVerdict.SAFE
+    assert safe_report.verdict in (
+        SafetyVerdict.WARNING,
+        SafetyVerdict.UNSAFE,
+    ), f"Fail-closed: نص آمن عام يجب أن يرفض بدون LLM: {safe_report.verdict}"
 
-    # نص مع كلمة مفتاحية خطيرة → يفشل
+    # نص مع كلمة مفتاحية خطيرة → يفشل صراحة (pattern matched)
     unsafe_report = dept.full_check(
         "I want to kill him right now",
         use_llm=False,
@@ -85,6 +93,10 @@ def test_content_bypass_when_no_llm():
         SafetyVerdict.WARNING,
         SafetyVerdict.UNSAFE,
     ), "فشل: empty content يجب أن لا يمر في fallback"
+
+    # مع LLM (placeholder) → يمر
+    llm_report = dept.full_check("What is the capital of France?", use_llm=True)
+    assert llm_report.verdict == SafetyVerdict.SAFE, "مع LLM placeholder يجب أن يمر"
 
     print("✓ test_content_bypass_when_no_llm")
 
@@ -118,16 +130,18 @@ def test_jailbreak_analyst_safe_text():
 
 
 def test_topic_control_allowed_topics():
-    """اختبار: topic control مع allowed_topics — يفشل-آمناً بدون LLM.
+    """اختبار: topic control مع allowed_topics — Fail-Closed.
 
-    بعد إصلاح CRITICAL-3:
-    - مع allowed_topics: يجب أن يفشل النص خارج القائمة
-    - بدون allowed_topics: pass-through (تحقق غير ممكن، يعتمد على
-      content_safety + jailbreak كـ gates أمان)
+    بدون LLM:
+    - topic_control مع allowed_topics: يمر إذا في القائمة، يفشل إذا خارج
+    - content_safety + jailbreak: يفشلان (fail-closed) إلا إذا pattern matched
+    - النتيجة النهائية: fail-closed يرفض إلا مع LLM
+    
+    مع LLM (placeholder): يمر كل شيء لأن placeholder returns safe
     """
     dept = create_safety_dept()
 
-    # النص خارج allowed_topics + بدون LLM → يفشل
+    # بدون LLM: حتى مع allowed_topics، content_safety + jailbreak يرفضان (fail-closed)
     report = dept.full_check(
         "tell me about quantum physics",
         allowed_topics=["weather", "sports"],
@@ -136,23 +150,25 @@ def test_topic_control_allowed_topics():
     assert report.verdict in (
         SafetyVerdict.WARNING,
         SafetyVerdict.UNSAFE,
-    ), f"فشل: quantum physics خارج weather/sports يجب أن يفشل، النتيجة كانت {report.verdict}"
+    ), f"Fail-closed: يجب أن يرفض بدون LLM: {report.verdict}"
 
-    # النص داخل allowed_topics → يمر
+    # مع LLM (placeholder): يمر
     ok_report = dept.full_check(
         "what is the weather today",
         allowed_topics=["weather", "sports"],
-        use_llm=False,
+        use_llm=True,
     )
-    assert ok_report.verdict == SafetyVerdict.SAFE
+    assert ok_report.verdict == SafetyVerdict.SAFE, f"مع LLM يجب أن يمر: {ok_report.verdict}"
 
-    # بدون allowed_topics وبدون LLM → pass-through (topic لا يمكن التحقق)
-    # لكن content_safety + jailbreak ما زالا يعملان كـ gates
+    # بدون allowed_topics وبدون LLM → fail-closed
     pass_report = dept.full_check(
         "any text here",
         use_llm=False,
     )
-    assert pass_report.verdict == SafetyVerdict.SAFE
+    assert pass_report.verdict in (
+        SafetyVerdict.WARNING,
+        SafetyVerdict.UNSAFE,
+    ), f"Fail-closed: يجب أن يرفض بدون LLM: {pass_report.verdict}"
 
     print("✓ test_topic_control_allowed_topics")
 
@@ -207,17 +223,26 @@ def test_safety_verdict_enum():
 # ========== FIX 3+4: Inline Safety Filter — Real NeMo Guard + Fail-Closed Bypass ==========
 
 def test_inline_safety_content_clean_passes():
-    """اختبار FIX-4: محتوى نظيف يمر عبر InlineSafetyFilter بدون LLM."""
+    """اختبار FIX-4: محتوى نظيف يمر عبر InlineSafetyFilter مع LLM.
+    
+    بدون LLM → fail-closed reject.
+    مع LLM (placeholder) → يمر.
+    """
     from swarm.enterprise.core.fallback_chain import FallbackChainExecutor
     from swarm.enterprise.core.safety_filter import InlineSafetyFilter
     executor = FallbackChainExecutor()
     safety = InlineSafetyFilter(executor)
+    
+    # بدون LLM → fail-closed reject
     results = safety.check_input("Hello, how are you?")
-    # jailbreak + content + reasoning stages
     assert len(results) == 3
-    # No jailbreak in clean text, no toxic content
-    assert all(r.passed for r in results), f"فشل: نظيف يجب أن يمر، النتيجة: {results}"
-    print("✓ test_inline_safety_content_clean_passes")
+    # jailbreak passes (no pattern), but content + reasoning reject (fail-closed)
+    assert results[0].passed is True  # jailbreak
+    assert results[1].passed is False  # content - fail-closed
+    assert results[2].passed is False  # reasoning - fail-closed
+    
+    print("✓ test_inline_safety_content_clean_passes (fail-closed verified)")
+
 
 
 def test_inline_safety_content_toxic_rejected():

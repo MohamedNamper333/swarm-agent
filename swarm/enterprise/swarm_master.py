@@ -14,6 +14,7 @@ SwarmMaster — منسق الـ 50-Agent Swarm بالكامل.
 - ✅ لا end-to-end workflow → process() يعمل الكل
 """
 import logging
+import threading
 from dataclasses import dataclass, field
 from enum import Enum
 from typing import Any, Dict, List, Optional
@@ -163,6 +164,7 @@ class SwarmMaster:
         }
 
         self._request_counter = 0
+        self._lock = threading.Lock()
 
     def process(self, request: SwarmRequest) -> SwarmResult:
         """معالجة طلب كامل عبر كل الـ tiers.
@@ -174,8 +176,9 @@ class SwarmMaster:
         4. Route to Department
         5. Execute and return
         """
-        self._request_counter += 1
-        req_id = f"req-{self._request_counter:06d}"
+        with self._lock:
+            self._request_counter += 1
+            req_id = f"req-{self._request_counter:06d}"
 
         stages: Dict[str, Any] = {}
         metadata = {"request_id": req_id, "timestamp": self._now_iso()}
@@ -185,6 +188,11 @@ class SwarmMaster:
             safety_result = self._safety_check(request)
             stages["safety"] = safety_result
             if safety_result.get("verdict") in ("unsafe", "critical"):
+                # M13: Include all stages even on safety veto
+                stages["board"] = {"verdict": "skipped", "reason": "safety_veto"}
+                stages["csuite"] = {"verdict": "skipped", "reason": "safety_veto"}
+                stages["routing"] = {"department": "none"}
+                stages["execution"] = {"department": "none", "success": False}
                 return SwarmResult(
                     request_id=req_id,
                     verdict="vetoed",
@@ -205,6 +213,9 @@ class SwarmMaster:
             "votes": board_result.votes,
         }
         if board_result.vetoed_by:
+            stages["csuite"] = {"verdict": "skipped", "reason": "board_veto"}
+            stages["routing"] = {"department": "none"}
+            stages["execution"] = {"department": "none", "success": False}
             return SwarmResult(
                 request_id=req_id,
                 verdict="vetoed",
@@ -224,6 +235,8 @@ class SwarmMaster:
         }
         # Check both vetoed (hard block) and rejected (CFO budget breach)
         if csuite_result.get("verdict") == "vetoed":
+            stages["routing"] = {"department": "none"}
+            stages["execution"] = {"department": "none", "success": False}
             return SwarmResult(
                 request_id=req_id,
                 verdict="vetoed",
@@ -234,6 +247,8 @@ class SwarmMaster:
                 metadata=metadata,
             )
         if csuite_result.get("verdict") == "rejected":
+            stages["routing"] = {"department": "none"}
+            stages["execution"] = {"department": "none", "success": False}
             return SwarmResult(
                 request_id=req_id,
                 verdict="rejected",
@@ -265,7 +280,7 @@ class SwarmMaster:
                 executed_by=dept_name.value,
                 metadata=metadata,
             )
-        except Exception as e:
+        except (RuntimeError, ValueError, KeyError, AttributeError) as e:
             logger.exception("Execution in %s failed", dept_name)
             stages["execution"] = {
                 "department": dept_name.value,
@@ -285,7 +300,9 @@ class SwarmMaster:
     def _safety_check(self, request: SwarmRequest) -> Dict[str, Any]:
         """يفحص PII/violence/jailbreak."""
         text = request.question + " " + str(request.context)
-        report = self.safety_dept.full_check(text, use_llm=False)
+        # Pass bypass_safety to department for internal fail-closed control
+        bypass = request.context.get("bypass_safety", False) if request.context else False
+        report = self.safety_dept.full_check(text, use_llm=not bypass)
         return {
             "verdict": report.verdict.value,
             "flags": report.flags,
@@ -296,7 +313,8 @@ class SwarmMaster:
     def _board_deliberate(self, request: SwarmRequest) -> BoardDecision:
         """يدعو المجلس للتصويت."""
         context_str = str(request.context) if request.context else ""
-        return self.board.deliberate(request.question, context=context_str)
+        bypass = request.bypass_safety
+        return self.board.deliberate(request.question, context=context_str, bypass_safety=bypass)
 
     def _csuite_decide(self, request: SwarmRequest, board_result: BoardDecision) -> Dict[str, Any]:
         """يدعو C-Suite للقرار التنفيذي."""
@@ -305,6 +323,7 @@ class SwarmMaster:
             "description": request.question,
             "type": request.type,
             "estimated_cost": request.estimated_cost,
+            "bypass_safety": request.context.get("bypass_safety", False) if request.context else False,
         }
         return self.csuite.executive_meeting(proposal)
 
@@ -317,12 +336,15 @@ class SwarmMaster:
             except ValueError:
                 pass
 
-        # 2. Auto-detect من الكلمات المفتاحية
+        # 2. Auto-detect من الكلمات المفتاحية (with word boundaries for precision)
+        import re
         text_lower = request.question.lower()
         scores: Dict[DeptType, int] = {dt: 0 for dt in DeptType}
         for dept, keywords in DEPT_ROUTING_KEYWORDS.items():
             for kw in keywords:
-                if kw in text_lower:
+                # Use word boundary matching to avoid false positives like "code" in "encode"
+                pattern = r'(?:^|\W)' + re.escape(kw) + r'(?:\W|$)'
+                if re.search(pattern, text_lower):
                     scores[dept] += 1
 
         # أعلى score
@@ -351,7 +373,9 @@ class SwarmMaster:
         if dept == DeptType.CODE:
             # Code: write code + review
             artifact = orch.coder_1.write_code(request.question, "python")
-            if artifact.code and "Error" not in artifact.code[:20]:
+            # C3: Better error detection - check artifact.success or review result
+            has_error = not artifact.code or artifact.code.strip().startswith("# Error:")
+            if not has_error:
                 review = orch.reviewer.full_review(artifact.code, artifact.language)
                 return {
                     "code": artifact.code,

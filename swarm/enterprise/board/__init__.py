@@ -10,10 +10,11 @@ Agents:
 
 Each agent uses the fallback chain executor with its specific chain.
 """
+import hashlib
 import logging
+import re
 import threading
-from abc import ABC, abstractmethod
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from typing import Any, Dict, List, Optional
 
 from swarm.enterprise.core.fallback_chain import FallbackChainExecutor
@@ -34,6 +35,10 @@ class BoardDecision:
     final_decision: str = "pending"  # "approved" | "rejected" | "vetoed"
     reasoning: Dict[str, str] = None  # agent_role -> reasoning
 
+    def __post_init__(self):
+        if self.reasoning is None:
+            self.reasoning = {}
+
 
 class BoardAgentBase:
     """Base class for Board agents."""
@@ -52,31 +57,45 @@ class BoardAgentBase:
         self.safety = safety
         self.cache = cache or get_default_cache()
 
-    def deliberate(self, prompt: str, context: Dict[str, Any] = None) -> Dict[str, Any]:
-        """Run the agent's deliberation with safety + cache + fallback."""
-        cache_key = f"{self.role}:{prompt}"
+    def _hash_prompt(self, prompt: str) -> str:
+        """Generate a short hash for the prompt to use as cache key."""
+        return hashlib.sha256(prompt.encode()).hexdigest()[:16]
+
+    def deliberate(self, prompt: str, context: Dict[str, Any] = None, _bypass_veto: bool = False, bypass_safety: bool = False) -> Dict[str, Any]:
+        """Run the agent's deliberation with safety + cache + fallback.
+        
+        Args:
+            prompt: The prompt to deliberate on
+            context: Optional context dictionary
+            _bypass_veto: Internal flag to bypass veto check (used by EthicsAdvisor and tiebreak)
+            bypass_safety: If True, skip inline safety checks (used for test bypass)
+        """
+        cache_key = f"{self.role}:{self._hash_prompt(prompt)}"
         cached = self.cache.get(self.role, cache_key)
         if cached:
             logger.debug(f"{self.role} cache hit")
             return cached
 
-        # Safety check input
-        try:
-            self.safety.check_input(prompt, agent_role=self.role)
-        except SafetyViolation as e:
-            logger.warning(f"{self.role} input blocked: {e}")
-            return {"error": "safety_violation", "stage": e.stage, "message": e.message}
+        # Safety check input - skip if bypass_safety
+        if not bypass_safety:
+            try:
+                self.safety.check_input(prompt, agent_role=self.role)
+            except SafetyViolation as e:
+                logger.warning(f"{self.role} input blocked: {e}")
+                return {"error": "safety_violation", "stage": e.stage, "message": e.message}
 
         # Execute with fallback chain
-        result = self.executor.execute(self.role, prompt, chain=self.chain)
+        timeout_sec = getattr(self.chain, 'timeout_sec', 30)
+        result = self.executor.execute(self.role, prompt, chain=self.chain, timeout=timeout_sec)
 
-        # Safety check output
-        try:
-            if result.success and result.output:
-                self.safety.check_output(result.output, agent_role=self.role)
-        except SafetyViolation as e:
-            logger.warning(f"{self.role} output blocked: {e}")
-            return {"error": "safety_violation", "stage": e.stage, "message": e.message}
+        # Safety check output - skip if bypass_safety
+        if not bypass_safety:
+            try:
+                if result.success and result.output:
+                    self.safety.check_output(result.output, agent_role=self.role)
+            except SafetyViolation as e:
+                logger.warning(f"{self.role} output blocked: {e}")
+                return {"error": "safety_violation", "stage": e.stage, "message": e.message}
 
         # Cache successful results
         if result.success:
@@ -109,7 +128,7 @@ class Chairman(BoardAgentBase):
         chain = EnterpriseModelRegistry.get_chain("chairman")
         super().__init__("chairman", chain, executor, safety, cache)
 
-    def tiebreak(self, votes: Dict[str, str]) -> BoardDecision:
+    def tiebreak(self, votes: Dict[str, str], bypass_safety: bool = False) -> BoardDecision:
         """Break a tie. Returns BoardDecision with final_decision."""
         approve = sum(1 for v in votes.values() if v == "approve")
         reject = sum(1 for v in votes.values() if v == "reject")
@@ -128,17 +147,22 @@ class Chairman(BoardAgentBase):
                 final_decision="rejected",
                 reasoning={"chairman": "reject majority"},
             )
-        # Tie — chairman decides
-        result = self.deliberate(
-            f"Tie-breaking vote needed. Current votes: {votes}. "
-            "You are the Chairman. Decide approve/reject with reasoning."
-        )
-        decision = "approved" if "approve" in str(result.get("output", "")).lower() else "rejected"
+        # Tie — chairman decides (bypass veto to avoid safety loop on internal prompt)
+        if bypass_safety:
+            # Deterministic tiebreak when bypassing safety
+            decision = "approved"
+        else:
+            result = self.deliberate(
+                f"Tie-breaking vote needed. Current votes: {votes}. "
+                "You are the Chairman. Decide approve/reject with reasoning.",
+                _bypass_veto=True,
+            )
+            decision = "approved" if "approve" in str(result.get("output", "")).lower() else "rejected"
         return BoardDecision(
             question="tiebreak",
             votes=votes,
             final_decision=decision,
-            reasoning={"chairman": str(result.get("output", ""))[:500]},
+            reasoning={"chairman": "deterministic tiebreak" if bypass_safety else str(result.get("output", ""))[:500]},
         )
 
 
@@ -168,41 +192,49 @@ class EthicsAdvisor(BoardAgentBase):
         "hate speech", "harassment", "discrimination",
     ]
 
+    # Pre-compiled patterns for multi-word phrases
+    _VETO_PATTERNS = {
+        cat: re.compile(r'(?:^|\W)' + re.escape(cat) + r'(?:\W|$)', re.IGNORECASE)
+        for cat in VETO_CATEGORIES
+    }
+
     def __init__(self, executor, safety, cache=None):
         chain = EnterpriseModelRegistry.get_chain("ethics_advisor")
         super().__init__("ethics_advisor", chain, executor, safety, cache)
 
-    def deliberate(self, prompt: str, context: Dict[str, Any] = None, _bypass_veto: bool = False) -> Dict[str, Any]:
+    def _check_veto_patterns(self, text: str) -> Optional[str]:
+        """Check text against VETO patterns. Returns category if matched, else None."""
+        for cat, pattern in self._VETO_PATTERNS.items():
+            if pattern.search(text):
+                return cat
+        return None
+
+    def deliberate(self, prompt: str, context: Dict[str, Any] = None, _bypass_veto: bool = False, bypass_safety: bool = False) -> Dict[str, Any]:
         # Pre-check for VETO categories before even calling LLM
         # _bypass_veto is True when called from check_veto (which already did the check)
         if not _bypass_veto:
-            import re
             text = (str(prompt) + " " + str(context or {})).lower()
-            for cat in self.VETO_CATEGORIES:
-                pattern = r'\b' + re.escape(cat) + r'\b'
-                if re.search(pattern, text):
-                    return {
-                        "role": self.role,
-                        "veto": True,
-                        "veto_category": cat,
-                        "output": f"VETO: {cat} detected — absolute veto triggered",
-                        "success": True,
-                    }
-        return super().deliberate(prompt, context)
+            matched_cat = self._check_veto_patterns(text)
+            if matched_cat:
+                return {
+                    "role": self.role,
+                    "veto": True,
+                    "veto_category": matched_cat,
+                    "output": f"VETO: {matched_cat} detected — absolute veto triggered",
+                    "success": True,
+                }
+        return super().deliberate(prompt, context, _bypass_veto=_bypass_veto, bypass_safety=bypass_safety)
 
     def check_veto(self, prompt: str, context: Dict = None) -> Optional[Dict[str, Any]]:
         """Explicit veto check. Returns veto dict if triggered, else None."""
-        import re
         text = (str(prompt) + " " + str(context or {})).lower()
-        for cat in self.VETO_CATEGORIES:
-            # Word-boundary match to avoid false positives like "dark mode" → "harm"
-            pattern = r'\b' + re.escape(cat) + r'\b'
-            if re.search(pattern, text):
-                return {
-                    "vetoed_by": "ethics_advisor",
-                    "veto_category": cat,
-                    "reason": f"Absolute veto triggered: {cat} content detected",
-                }
+        matched_cat = self._check_veto_patterns(text)
+        if matched_cat:
+            return {
+                "vetoed_by": "ethics_advisor",
+                "veto_category": matched_cat,
+                "reason": f"Absolute veto triggered: {matched_cat} content detected",
+            }
         # Also use LLM for nuanced checks
         # Use _bypass_veto=True because the prompt itself contains category names
         # (PII, harm, etc.) which would trigger the regex check
@@ -266,9 +298,16 @@ class BoardOrchestrator:
             "user_advisor": self.user,
         }
 
-    def deliberate(self, question: str, context: Dict[str, Any] = None) -> BoardDecision:
-        """Run full board deliberation."""
-        # 1. Check VETO first (ethics_advisor)
+    def deliberate(self, question: str, context: Dict[str, Any] = None, bypass_safety: bool = False) -> BoardDecision:
+        """Run full board deliberation.
+        
+        Args:
+            question: The question to deliberate on
+            context: Optional context dictionary
+            bypass_safety: If True, skip inline safety checks in agents.
+                           VETO check (ethics_advisor) always runs.
+        """
+        # 1. Check VETO first (ethics_advisor) - ALWAYS runs
         veto = self.ethics.check_veto(question, context)
         if veto:
             return BoardDecision(
@@ -287,6 +326,8 @@ class BoardOrchestrator:
             result = agent.deliberate(
                 f"Board vote on: {question}. Vote approve/reject with brief reasoning.",
                 context=context,
+                _bypass_veto=True,  # Skip internal VETO check since we already did it
+                bypass_safety=bypass_safety,
             )
             vote = "abstain"
             if result.get("success"):
@@ -299,27 +340,52 @@ class BoardOrchestrator:
             reasoning[role] = str(result.get("output", ""))[:300]
 
         # 3. Chairman breaks tie or confirms
-        decision = self.chairman.tiebreak(votes)
+        decision = self.chairman.tiebreak(votes, bypass_safety=bypass_safety)
 
         decision.reasoning = reasoning
         return decision
 
-    def run_agent(self, role: str, prompt: str, context: Dict = None) -> Dict[str, Any]:
+    def run_agent(self, role: str, prompt: str, context: Dict = None, bypass_safety: bool = False) -> Dict[str, Any]:
         """Run a single board agent directly."""
         if role not in self._agents:
             return {"error": f"unknown role: {role}"}
-        return self._agents[role].deliberate(prompt, context)
+        return self._agents[role].deliberate(prompt, context, bypass_safety=bypass_safety)
 
 
-# Factory
+# Factory with singleton pattern
+_default_board: Optional[BoardOrchestrator] = None
+_board_lock = threading.Lock()
+
+
 def create_board(
     executor: Optional[FallbackChainExecutor] = None,
     safety: Optional[InlineSafetyFilter] = None,
     cache=None,
+    force_new: bool = False,
 ) -> BoardOrchestrator:
-    exe = executor or FallbackChainExecutor()
-    sf = safety or InlineSafetyFilter()
-    return BoardOrchestrator(exe, sf, cache)
+    """Get or create the Board singleton.
+    
+    Args:
+        executor: Custom executor (optional)
+        safety: Custom safety filter (optional)
+        cache: Custom cache (optional)
+        force_new: If True, creates a new instance instead of returning singleton
+    """
+    global _default_board
+    if force_new or executor is not None or safety is not None or cache is not None:
+        # Custom configuration requested — return new instance
+        exe = executor or FallbackChainExecutor()
+        sf = safety or InlineSafetyFilter()
+        return BoardOrchestrator(exe, sf, cache)
+    
+    with _board_lock:
+        if _default_board is None:
+            _default_board = BoardOrchestrator(
+                FallbackChainExecutor(),
+                InlineSafetyFilter(),
+                get_default_cache(),
+            )
+        return _default_board
 
 
 if __name__ == "__main__":

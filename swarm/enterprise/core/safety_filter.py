@@ -12,6 +12,7 @@ On detection → raise SafetyViolation with details.
 import time
 import logging
 import threading
+import re
 from dataclasses import dataclass
 from typing import Any, Dict, List, Optional, Callable
 
@@ -42,25 +43,30 @@ class SafetyCheckResult:
     latency_ms: float = 0.0
 
 
-# Prompt patterns indicating jailbreak attempts
+# Prompt patterns indicating jailbreak attempts — compiled regex with word boundaries
 JAILBREAK_PATTERNS = [
-    "ignore previous instructions",
-    "ignore all previous",
-    "disregard prior",
-    "forget your instructions",
-    "you are now",
-    "act as",
-    "pretend to be",
-    "roleplay as",
-    "system prompt:",
-    "[system]",
-    "<|im_start|>",
-    "<|system|>",
-    "dan mode",
-    "jailbreak",
-    "bypass safety",
-    "no restrictions",
+    r"\bignore\s+(all\s+)?previous\s+instructions\b",
+    r"\bdisregard\s+prior\b",
+    r"\bforget\s+your\s+instructions\b",
+    r"\byou\s+are\s+now\b",
+    r"\bact\s+as\b",
+    r"\bpretend\s+to\s+be\b",
+    r"\broleplay\s+as\b",
+    r"\bsystem\s+prompt\b",
+    r"\[system\]",
+    r"»",
+    r"<\|system\|>",
+    r"\bdan\s+mode\b",
+    r"\bjailbreak\b",
+    r"\bbypass\s+safety\b",
+    r"\bno\s+restrictions\b",
+    r"\boverride\s+your\s+instructions\b",
+    r"\bdisregard\s+your\s+(safety|guidelines|rules)\b",
+    r"\bdo\s+not\s+follow\s+(any\s+)?(rules|guidelines)\b",
 ]
+
+# Pre-compile for performance
+_JAILBREAK_REGEX = [re.compile(p, re.IGNORECASE) for p in JAILBREAK_PATTERNS]
 
 
 class InlineSafetyFilter:
@@ -135,10 +141,10 @@ class InlineSafetyFilter:
         return results
 
     def _stage_jailbreak(self, prompt: Any) -> SafetyCheckResult:
-        """Stage 1: Jailbreak detection via pattern match (fastest) + model fallback."""
+        """Stage 1: Jailbreak detection via regex match (fastest) + model fallback."""
         start = time.time()
         text = str(prompt).lower()
-        matches = [p for p in JAILBREAK_PATTERNS if p in text]
+        matches = [pattern.pattern for pattern in _JAILBREAK_REGEX if pattern.search(text)]
         latency_ms = (time.time() - start) * 1000
         self._stats["input_checks"] += 1
         if matches:
@@ -321,15 +327,40 @@ class InlineSafetyFilter:
         """Regex-only content safety fallback when NVIDIA_API_KEY is missing.
 
         Fail-closed: empty text → reject. Known-toxic patterns → reject.
-        Otherwise → accept with audit log.
+        Otherwise → reject with audit log (fail-closed for defense in depth).
         """
         text_lower = text.strip().lower()
+        # Comprehensive toxic patterns covering major threat categories
         toxicity_patterns = [
-            "how to make a bomb", "kill yourself", "child abuse",
-            "i want to kill him", "i want to kill her",
-            "how to synthesize", "build a weapon",
+            # PII
+            r"\b\d{3}-\d{2}-\d{4}\b",  # SSN
+            r"\b\d{4}[\s-]?\d{4}[\s-]?\d{4}[\s-]?\d{4}\b",  # Credit card
+            r"\b[A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+\.[A-Z|a-z]{2,}\b",  # Email
+            r"\b\d{3}[\s-]?\d{3}[\s-]?\d{4}\b",  # Phone
+            # Violence
+            r"\b(kill|murder|assassinate|stab|shoot|strangle)\s+(him|her|them|you|someone|person|people)\b",
+            r"\bhow\s+to\s+(make|build|synthesize|create)\s+(bomb|explosive|weapon)\b",
+            r"\b(make|build|create|construct)\s+(a\s+)?(bomb|explosive|weapon)\b",
+            r"\b(torture|mutilate|dismember)\b",
+            # Self-harm
+            r"\b(suicide|kill\s+myself|end\s+my\s+life|self\.harm)\b",
+            # Child exploitation
+            r"\b(child|kid|minor)\s+(porn|sex|abuse|exploitation)\b",
+            r"\b(rape|sexual\s+assault|molest)\b",
+            # Illegal activity
+            r"\b(drug\s+trafficking|money\s+laundering|tax\s+evasion)\b",
+            r"\b(illegal\s+drugs|narcotics|cocaine|heroin|meth)\s+(deal|sell|buy|cook|manufacture)\b",
+            r"\b(buy|sell|order)\s+(illegal\s+)?(weapons?|guns?|firearms?)\b",
+            r"\b(hack|breach|exploit)\s+(into|system|server|database|network)\b",
+            r"\b(stolen|carded)\s+(credit\s+card|cards)\b",
+            r"\b(phishing|scam|steal)\s+(identity|credentials|passwords)\b",
+            # Hate/genocide
+            r"\b(genocide|ethnic\s+cleansing|final\s+solution)\b",
+            r"\b(all\s+\w+\s+(should|must|deserve\s+to)\s+(die|be\s+killed|be\s+exterminated))\b",
+            # Drug manufacturing
+            r"\b(synthesize|cook\s+up|manufacture)\s+(meth|fentanyl|heroin|crack)\b",
         ]
-        has_toxic = any(p in text_lower for p in toxicity_patterns)
+        has_toxic = any(re.search(p, text_lower) for p in toxicity_patterns)
 
         latency_ms = (time.time() - start) * 1000
         if is_output:
@@ -351,15 +382,16 @@ class InlineSafetyFilter:
                 model=f"{model_id}:regex-fallback",
                 latency_ms=latency_ms,
             )
-        # No toxic pattern + non-empty → pass with audit
+        # Fail-closed: no pattern matched but no LLM to verify → reject
         logger.warning(
-            "content_safety regex fallback (no NVIDIA_API_KEY): "
-            "length=%d", len(text_lower),
+            "content_safety regex fallback REJECT (no NVIDIA_API_KEY): "
+            "length=%d; no toxic pattern matched — fail-closed",
+            len(text_lower),
         )
         return SafetyCheckResult(
-            stage="content_safety", passed=True, severity="low",
-            message="regex-only fallback (LLM unavailable)",
-            model=f"{model_id}:regex-fallback",
+            stage="content_safety", passed=False, severity="warning",
+            message="No toxic pattern matched — fallback reject (fail-closed)",
+            model=f"{model_id}:regex-fallback-fail-closed",
             latency_ms=latency_ms,
         )
 
@@ -375,17 +407,33 @@ class InlineSafetyFilter:
         Reasoning safety looks for manipulation attempts not caught by
         content/jailbreak checks. Without LLM, we apply a stricter regex
         set focused on instruction-style override language.
+
+        Fail-closed: empty text → reject. Manipulation patterns → reject.
+        Otherwise → reject (fail-closed for defense in depth).
         """
         text_lower = text.strip().lower()
+        # Comprehensive manipulation patterns
         manipulation_patterns = [
-            "follow my new instructions",
-            "override previous behavior",
-            "you must comply with",
-            "comply with my instructions",
-            "act as my assistant only",
-            "disregard your training",
+            r"\bfollow\s+my\s+new\s+instructions\b",
+            r"\boverride\s+previous\s+behavior\b",
+            r"\byou\s+must\s+comply\s+with\b",
+            r"\bcomply\s+with\s+my\s+instructions\b",
+            r"\bact\s+as\s+my\s+assistant\s+only\b",
+            r"\bdisregard\s+your\s+training\b",
+            r"\bignore\s+(the\s+)?(above|previous)\s+(instructions|prompt)\b",
+            r"\bnew\s+instructions\s*:\b",
+            r"\byou\s+are\s+now\s+(in\s+)?(developer|debug|god|jailbroken)\s+mode\b",
+            r"\bpretend\s+(you\s+)?(are|to\s+be)\s+(a|an)\s+\w+\s+without\b",
+            r"\bsystem\s*:\s*you\s+are\b",
+            r"\bdan\s+mode\b",
+            r"\bdo\s+not\s+follow\s+(any\s+)?(rules|guidelines)\b",
+            r"\bdisregard\s+(your|the|all)\s+(safety|guidelines|rules)\b",
+            r"\bact\s+as\s+(if\s+)?(you\s+)?(have\s+)?no\s+(restrictions|rules|limits)\b",
+            r"\bbypass\s+(your|the|all)\s+(safety|filters|content)\b",
+            r"\breveal\s+(your|the)\s+(system\s+prompt|instructions)\b",
+            r"\boutput\s+(your|the)\s+(initial|original|system)\s+prompt\b",
         ]
-        has_manipulation = any(p in text_lower for p in manipulation_patterns)
+        has_manipulation = any(re.search(p, text_lower) for p in manipulation_patterns)
 
         latency_ms = (time.time() - start) * 1000
         if is_output:
@@ -407,15 +455,16 @@ class InlineSafetyFilter:
                 model=f"{model_id}:regex-fallback",
                 latency_ms=latency_ms,
             )
-        # Pass-through; content + jailbreak still gate
+        # Fail-closed: no pattern matched but no LLM to verify → reject
         logger.warning(
-            "reasoning_safety regex fallback (no NVIDIA_API_KEY): "
-            "length=%d", len(text_lower),
+            "reasoning_safety regex fallback REJECT (no NVIDIA_API_KEY): "
+            "length=%d; no manipulation pattern matched — fail-closed",
+            len(text_lower),
         )
         return SafetyCheckResult(
-            stage="reasoning_safety", passed=True, severity="low",
-            message="regex-only fallback (LLM unavailable)",
-            model=f"{model_id}:regex-fallback",
+            stage="reasoning_safety", passed=False, severity="warning",
+            message="No manipulation pattern matched — fallback reject (fail-closed)",
+            model=f"{model_id}:regex-fallback-fail-closed",
             latency_ms=latency_ms,
         )
 

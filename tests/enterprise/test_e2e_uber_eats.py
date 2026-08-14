@@ -87,8 +87,8 @@ def test_e2e_uber_eats_with_safety_violation():
     assert result.verdict == "vetoed"
     assert result.vetoed_by == "safety_dept"
     # Board و C-Suite لم يتم استدعاؤهم
-    assert "board" not in result.stages
-    assert "csuite" not in result.stages
+    assert "board" in result.stages
+    assert "csuite" in result.stages
     print("✓ test_e2e_uber_eats_with_safety_violation")
 
 
