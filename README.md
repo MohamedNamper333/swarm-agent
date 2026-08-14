@@ -1,248 +1,211 @@
-# 🐝 Swarm Agent System
+# ��� Enterprise Swarm Agent System
 
-> **Multi-Agent Orchestration Framework** built on [opencode](https://opencode.ai)  
-> 10 specialized workers • 6-stage pipeline • Constitutional AI • Obsidian Vault memory
-
----
-
-## 🎯 What Is This?
-
-The **Swarm Agent System** is a production-grade multi-agent orchestration framework that executes a **6-stage deep thinking pipeline** with mandatory worker dispatch. It coordinates **10 specialized subagents** across 7 free-tier models (Nemotron 3 Ultra ×4, MiMo V2.5 ×4, DeepSeek V4, Hy3, Laguna, Ling, big-pickle) with Constitutional AI gates, private scratchpad reasoning, and dynamic token budget management.
-
-**Core Philosophy:** The Coordinator analyzes → plans → dispatches workers in parallel → verifies via 12-step auto-verdict → improves → hands off. **No implementation work is done by the Coordinator** — all execution is delegated to specialized workers via the `task` tool.
+> **Production-Grade Multi-Agent Orchestration Framework** — 50-Agent Enterprise Architecture with VETO Governance, Budget Control, and Cross-Department Workflows
 
 ---
 
-## 🏗️ Architecture at a Glance
+## ��� What Is This?
 
-```
-┌─────────────────────────────────────────────────────────────────┐
-│  COORDINATOR (swarm)                                            │
-│  6-Stage Pipeline: Plan → Design → Execute → Verify → Improve  │
-└──────────────────────────┬──────────────────────────────────────┘
-                           │ MANDATORY DISPATCH (task tool)
-                           ▼
-┌─────────────────────────────────────────────────────────────────┐
-│  WORKER POOL (10 Subagents)                                     │
-│  ┌─────────────┬─────────────┬─────────────┬─────────────────┐ │
-│  │ innovator   │ critic      │ architect   │ explorer        │ │
-│  │ DeepSeek V4 │ Nemotron 3  │ Nemotron 3  │ MiMo V2.5       │ │
-│  │ Creative    │ Code Review │ Implementation│ Research        │ │
-│  ├─────────────┼─────────────┼─────────────┼─────────────────┤ │
-│  │ reviewer    │ reasoner    │ vision-coder│ laguna-s-2-1    │ │
-│  │ Nemotron 3  │ Hy3 Free    │ MiMo V2.5   │ General Purpose │ │
-│  │ UX/Design   │ Logic       │ Multimodal  │ Free Model      │ │
-│  ├─────────────┼─────────────┼─────────────┼─────────────────┤ │
-│  │ ling-3-0    │ swarm-worker│             │                 │ │
-│  │ flash       │ -qa         │             │                 │ │
-│  │ Fast Reason │ Testing     │             │                 │ │
-│  └─────────────┴─────────────┴─────────────┴─────────────────┘ │
-└─────────────────────────────────────────────────────────────────┘
-                           │
-                           ▼
-┌─────────────────────────────────────────────────────────────────┐
-│  MEMORY LAYER: Obsidian Vault (REST API)                        │
-│  vault_server.py (localhost:27123) ↔ vault_client.py            │
-└─────────────────────────────────────────────────────────────────┘
-```
+**Enterprise Swarm** is a 50-agent orchestration framework designed for enterprise-grade decision making with:
+
+- **Tier 1 — Board (5 agents):** Chairman, Strategy, Ethics(VETO), Risk, User Advisor
+- **Tier 2 — C-Suite (7 agents):** CEO, CTO, CFO(budget), COO, CMO, CHRO, CLO(VETO)
+- **Tier 3-4 — Departments (40 agents):** Code, Design, Video, Research, Data, Language, Knowledge, Safety
+- **Safety Dept (4 agents):** Content, Topic Control, Jailbreak, Director — fail-closed by default
+
+**Governance Model:** 3-layer VETO cascade (Safety → Board Ethics → CLO Legal) + CFO Budget Circuit Breaker (80%)
 
 ---
 
-## ⚡ Quick Start
+## ��� Quick Start
 
 ### Prerequisites
-- [opencode](https://opencode.ai) installed
 - Python 3.10+
-- Obsidian Vault at `/home/kali/Documents/Obsidian Vault` (or set `VAULT_PATH`)
-- Meilisearch on port 7700 (for fast search)
+- (Optional) `NVIDIA_API_KEY` for real NeMo Guard models — uses smart placeholders without it
 
-### 1. Start Vault Server
+### 1. Run Core Tests
 ```bash
 cd /home/kali/swarm-agent
-python3 vault_server.py &
+python -m pytest tests/enterprise/test_safety.py -v
+python -m pytest tests/enterprise/test_board.py -v
+python -m pytest tests/enterprise/test_csuite.py -v
+python -m pytest tests/enterprise/test_workflows.py -v
+python -m pytest tests/enterprise/test_e2e_uber_eats.py -v
 ```
 
-### 2. Verify Configuration
-```bash
-python3 test_swarm_routing.py
-# Should show: 4/4 tests passed
-```
+### 2. Run a Request
+```python
+import sys
+sys.path.insert(0, '/home/kali/swarm-agent')
+from swarm.enterprise.swarm_master import SwarmMaster, SwarmRequest
 
-### 3. Run a Task
-```bash
-# Simple creative task (LITE pipeline)
-opencode run swarm "List 3 innovative uses for blockchain in healthcare"
+master = SwarmMaster(cfo_budget_limit=100000)
 
-# Comparative analysis (STANDARD pipeline)
-opencode run swarm "Compare Python vs TypeScript for a web API backend"
+# Normal code request
+result = master.process(SwarmRequest(
+    question="Build a Python function for binary search",
+    type="code",
+    bypass_safety=True
+))
+print(f"Verdict: {result.verdict}, Executed by: {result.executed_by}")
 
-# Complex system design (FULL pipeline + Constitutional AI)
-opencode run swarm "Design a payment processing API with PCI-DSS compliance"
-```
+# Legal VETO
+result = master.process(SwarmRequest(
+    question="Plagiarize competitor code",
+    type="code",
+    bypass_safety=True
+))
+print(f"Vetoed by: {result.vetoed_by}")
 
----
-
-## 📚 Documentation
-
-| File | Description |
-|------|-------------|
-| [`SWARM-INDEX-000.md`](SWARM-INDEX-000.md) | Master index & architecture overview |
-| [`SWARM-PROJECT-MAP.md`](SWARM-PROJECT-MAP.md) | Deep-dive: architecture, line-by-line analysis, readiness matrix |
-| [`SWARM-EXECUTION-PLAN.md`](SWARM-EXECUTION-PLAN.md) | Pipeline specification (all 6 stages, gates, variants) |
-| [`SWARM-EVOLUTION-PLAN.md`](SWARM-EVOLUTION-PLAN.md) | Roadmap: CI/CD, dashboard, model resilience, plugins |
-| [`SWARM-VAULT-WRITER.md`](SWARM-VAULT-WRITER.md) | 6-layer writing methodology for all outputs |
-| [`SWARM-TESTS.md`](SWARM-TESTS.md) | Test suite overview (routing + 5 difficulty levels) |
-| [`VAULT_API.md`](VAULT_API.md) | Client/server API reference |
-
-### Test Reports (Generated on Execution)
-| File | Difficulty | Pipeline |
-|------|------------|----------|
-| `SWARM-TEST-001-EASY.md` | EASY | LITE (3 stages, 1 worker) |
-| `SWARM-TEST-002-MEDIUM.md` | MEDIUM | STANDARD (4 stages, 3 parallel) |
-| `SWARM-TEST-003-HARD.md` | HARD | FULL (6 stages + Constitutional AI) |
-| `SWARM-TEST-004-VERY-HARD.md` | VERY HARD | FULL + Adversarial Review |
-| `SWARM-TEST-005-IMPOSSIBLE.md` | IMPOSSIBLE | FULL + Contradiction Resolution |
-
----
-
-## 🔧 Core Components
-
-### Configuration: `opencode.json`
-Defines all 11 agents (Coordinator + 10 Workers) with models, tools, skills, permissions.
-
-### Skills (in `skills/`)
-| Skill | Purpose |
-|-------|---------|
-| `swarm-constitutional-layer` | 5 principles enforced at Stage 4 |
-| `swarm-scratchpad` | Private reasoning protocol per worker |
-| `swarm-token-budget` | Dynamic LITE/STANDARD/FULL selection |
-| `swarm-vault-writer` | 6-layer document methodology |
-| `swarm-observability` | JSONL event logging + metrics |
-| `swarm-memory-protocol` | Structured stage artifacts |
-| `swarm-worker-enhanced` | Base for all 10 workers (harness + scratchpad) |
-
-### Infrastructure
-| File | Purpose |
-|------|---------|
-| `vault_server.py` | HTTP server for Obsidian Vault (port 27123) |
-| `vault_client.py` | Python REST wrapper for agents |
-| `test_swarm_routing.py` | Validates opencode.json configuration |
-
----
-
-## 🧪 Testing
-
-### Routing Verification (Run Anytime)
-```bash
-python3 test_swarm_routing.py
-```
-Validates: Model mapping, Tool permissions, Skill assignments, Permission grants
-
-### Pipeline Tests (Run via opencode)
-```bash
-# EASY — LITE pipeline, 1 worker
-opencode run swarm "brainstorm feature ideas" --difficulty easy
-
-# MEDIUM — STANDARD pipeline, 3 parallel workers
-opencode run swarm "compare databases for analytics" --difficulty medium
-
-# HARD — FULL pipeline + Constitutional AI
-opencode run swarm "design secure auth system" --difficulty hard
-
-# VERY HARD — Adversarial review
-opencode run swarm "SQL vs NoSQL for social platform" --difficulty very-hard
-
-# IMPOSSIBLE — Contradiction resolution
-opencode run swarm "make it fast AND thorough" --difficulty impossible
+# Budget overflow
+m2 = SwarmMaster(cfo_budget_limit=100)
+m2.csuite.cfo.record_spend(85)
+result = m2.process(SwarmRequest(
+    question="Big project",
+    type="code",
+    estimated_cost=10,
+    bypass_safety=True
+))
+print(f"Budget veto: {result.vetoed_by}")
 ```
 
 ---
 
-## 📊 System Readiness
+## ������ Architecture
 
-| Component | Status |
-|-----------|--------|
-| Coordinator + 10 Workers | ✅ Complete |
-| 6-Stage Pipeline (LITE/FULL) | ✅ Complete |
-| Constitutional Gates | ✅ Complete |
-| Private Scratchpad + Harness | ✅ Complete |
-| Vault Integration | ✅ Complete |
-| Test Suite (5 levels) | ✅ Complete |
-| Routing Verification | ✅ Complete |
-| Documentation (6-layer) | ✅ Complete |
-| **Overall** | **95%** |
-
-**Missing:** CI/CD automation, Web dashboard, Model fallback chain
+```
+��─────────────────────────────────────────────────────────────────────��
+│                     SWARM MASTER (Orchestrator)                     │
+│  5-Stage Pipeline: Safety → Board → C-Suite → Routing → Execution  │
+��──────────────────────────────��──────────────────────────────────────��
+                               │
+         ��─────────────────────��─────────────────────��
+         ��                     ��                     ��
+    ��──────────��         ��──────────��          ��──────────────��
+    │  BOARD   │         │ C-SUITE  │          │  DEPARTMENTS │
+    │ (5 agents)│        │(7 agents)│          │ (40 agents)  │
+    │ • Chair  │        │ • CEO    │          │ • Code (7)   │
+    │ • Strategy│        │ • CTO    │          │ • Design (8) │
+    │ • Ethics(VETO)│     │ • CFO(80%)│         │ • Video (6)  │
+    │ • Risk   │        │ • COO    │          │ • Research(4)│
+    │ • User   │        │ • CMO    │          │ • Data (3)   │
+    └──────────��        │ • CHRO   │          │ • Lang (3)   │
+                        │ • CLO(VETO)         │ • Knowledge(5)│
+                        └──────────��          │ • Safety (4) │
+                                              └──────────────��
+```
 
 ---
 
-## 🗂️ Project Structure
+## ������ Governance Features
+
+| Feature | Description |
+|---------|-------------|
+| **Safety Dept VETO** | PII, Violence, Jailbreak — blocks before Board/C-Suite |
+| **Board Ethics VETO** | Absolute veto on PII, harm, illegal content |
+| **CLO Legal VETO** | Multi-word patterns (reverse engineer, terms of service, IP violation) |
+| **CFO Budget Circuit Breaker** | 80% threshold auto-rejects overspend |
+| **Fail-Closed Safety** | All regex fallbacks reject by default (no NVIDIA_API_KEY) |
+| **Thread-Safe Singleton** | SwarmMaster, Board, C-Suite with `force_new` for tests |
+
+---
+
+## ��� Test Coverage
+
+| Test Suite | Tests | Status |
+|------------|-------|--------|
+| `test_safety.py` | 19 | �� |
+| `test_board.py` | 10 | �� |
+| `test_csuite.py` | 13 | �� |
+| `test_workflows.py` | 12 | �� |
+| `test_e2e_uber_eats.py` | 7 | �� |
+| `test_swarm_master.py` | 33 | �� |
+| **Core Enterprise** | **94** | **��� All Pass** |
+
+Run all: `python -m pytest tests/enterprise/ -v`
+
+---
+
+## ��� Project Structure
 
 ```
 /home/kali/swarm-agent/
-├── opencode.json                    # 11 agent definitions
-├── vault_client.py                  # REST client for Obsidian
-├── vault_server.py                  # HTTP server + Meilisearch proxy
-├── test_swarm_routing.py            # Configuration validator
-├── README.md                        # This file
-├── VAULT_API.md                     # API reference
-├── SWARM-INDEX-000.md               # Master index
-├── SWARM-PROJECT-MAP.md             # Architecture deep-dive
-├── SWARM-EXECUTION-PLAN.md          # Pipeline spec
-├── SWARM-EVOLUTION-PLAN.md          # Roadmap
-├── SWARM-VAULT-WRITER.md            # Writing methodology
-├── SWARM-TESTS.md                   # Test suite overview
-├── SWARM-TEST-001-EASY.md           # Test specs (5 levels)
-├── SWARM-TEST-002-MEDIUM.md
-├── SWARM-TEST-003-HARD.md
-├── SWARM-TEST-004-VERY-HARD.md
-├── SWARM-TEST-005-IMPOSSIBLE.md
-├── skills/
-│   ├── swarm-constitutional-layer/
-│   ├── swarm-memory-protocol/
-│   ├── swarm-observability/
-│   ├── swarm-scratchpad/
-│   ├── swarm-token-budget/
-│   ├── swarm-vault-writer/
-│   └── swarm-worker-enhanced/
-│       ├── architect/
-│       ├── critic/
-│       ├── explorer/
-│       ├── innovator/
-│       ├── reasoner/
-│       ├── reviewer/
-│       ├── swarm-worker-qa/
-│       └── vision-coder/
-└── swarm/
-    ├── agents/      # .gitkeep (tracked empty dirs)
-    ├── config/
-    └── lib/
+├── swarm/
+│   └── enterprise/
+│       ├── swarm_master.py      # Main orchestrator (5 stages)
+│       ├── board/
+│       │   └── __init__.py      # 5 agents + VETO logic
+│       ├── csuite/
+│       │   └── __init__.py      # 7 agents + budget + legal VETO
+│       ├── safety/
+│       │   └── __init__.py      # 4 agents + fail-closed
+│       ├── code/                # 7 agents
+│       ├── design/              # 8 agents
+│       ├── video/               # 6 agents
+│       ├── research/            # 4 agents
+│       ├── data/                # 3 agents
+│       ├── language/            # 3 agents
+│       ├── knowledge/           # 5 agents
+│       └── core/
+│           ├── safety_filter.py # Inline 3-stage filter
+│           ├── fallback_chain.py
+│           ├── model_registry_v2.py
+│           ├── cache_manager.py
+│           └── circuit_breaker.py
+��── tests/enterprise/            # 94+ tests
 ```
 
 ---
 
-## 🤝 Contributing
+## ��� Configuration
 
-1. All changes follow the **6-layer writing methodology** (`SWARM-VAULT-WRITER.md`)
-2. Configuration changes validated by `test_swarm_routing.py`
-3. New workers added to `opencode.json` with full skill set
-4. Constitutional principles enforced at Stage 4
+### Budget Limit
+```python
+master = SwarmMaster(cfo_budget_limit=50000)  # $50k daily limit
+```
+
+### Bypass Safety (Testing Only)
+```python
+request = SwarmRequest(question="...", bypass_safety=True)
+```
+
+### Force New Instances (Tests)
+```python
+board = create_board(force_new=True)
+csuite = create_c_suite(cfo_budget_limit=100, force_new=True)
+```
 
 ---
 
-## 📄 License
+## ��� Current Status
+
+| Component | Status |
+|-----------|--------|
+| Swarm Master Pipeline | �� Complete |
+| Board (5 agents + VETO) | �� Complete |
+| C-Suite (7 agents + Budget + Legal VETO) | �� Complete |
+| Safety Dept (4 agents + Fail-Closed) | �� Complete |
+| 8 Departments (40 agents) | �� Complete (placeholder execution) |
+| Inline Safety Filter (3-stage) | �� Complete |
+| Circuit Breaker + Rate Limiter | �� Complete |
+| Cache Manager (LRU + TTL) | �� Complete |
+| **All Enterprise Tests** | **��� 94/94 Pass** |
+
+**Missing:** Real NVIDIA NIM integration (needs `NVIDIA_API_KEY`), CI/CD, production deployment scripts
+
+---
+
+## ��� License
 
 MIT License — see `LICENSE` file.
 
 ---
 
-## 🔗 Links
+## ��� Links
 
-- [opencode](https://opencode.ai) — The underlying CLI framework
-- [Obsidian](https://obsidian.md) — Vault storage
-- [Meilisearch](https://meilisearch.com) — Fast search backend
+- [NVIDIA NeMo Guard](https://github.com/NVIDIA/NeMo-Guardrails) — Safety models
+- [opencode](https://opencode.ai) — CLI framework
 
 ---
 
-*Generated by Swarm Vault Writer v2.0.0 — 6-layer methodology*  
-*Last updated: 2026-08-03*
+*Last updated: 2026-08-14 — Enterprise Swarm v1.0.0*
