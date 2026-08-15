@@ -1,155 +1,180 @@
 # SWARM Competitive Architecture Program
 
-> **Status:** MEMORY DEEP DIVE — DEPENDENCY AUDIT COMPLETE / IMPLEMENTATION SPECIFICATION NEXT
+> **Document Type:** Institutional Architecture Research + Build Blueprint
+> **Status:** MEMORY DEEP DIVE COMPLETE / WORKFLOW ENGINE BUILD BLUEPRINT COMPLETE
 > **Target Branch:** `main`
-> **Single Source of Truth:** This document is the only MD document for the competitive architecture program.
+> **Single Source of Truth:** This is the only Markdown document for the competitive architecture program.
+> **Execution Policy:** Research and architecture first. Implementation is explicitly deferred until the corresponding build blueprint is approved.
 
-## 1. Executive Objective
+---
 
-SWARM will not be replaced by another framework and will not blindly copy another codebase.
+# 1. Program Mission
 
-> **Benchmark the best → reverse-engineer the reason → identify trade-offs → adapt the principle → implement in SWARM → verify with measurable evidence.**
+SWARM is being evolved into a production-grade **Governed Multi-Agent Operating Platform**.
 
-The target is a production-grade **Governed Multi-Agent Operating Platform** combining Board/C-Suite governance, departmental specialization, safety VETO, authoritative budget control, durable execution, strong memory, reliable routing, distributed execution, observability, model abstraction, human-in-the-loop controls, and enterprise security.
+The program does not replace SWARM with another framework and does not blindly copy another repository.
 
-## 2. Non-Negotiable Methodology
+The governing rule is:
 
-Every subsystem follows:
+> **Benchmark the best → reverse-engineer the reason → identify trade-offs → adapt the principle → design the SWARM-native system → prove the design → implement later.**
 
-1. Audit the current implementation at file/class/function/data-flow level.
-2. Select the strongest relevant benchmark.
-3. Reverse-engineer architecture, abstractions, lifecycle, state, failure handling, and tests.
-4. Extract the decisions responsible for the advantage.
-5. Analyze limitations and trade-offs.
-6. Adapt the principle to SWARM rather than copying implementation.
-7. Define contracts, invariants, state transitions, and boundaries.
-8. Define exact implementation changes.
-9. Define migration and rollback.
-10. Define validation and measurable acceptance criteria.
-11. Verify with evidence.
+The target system combines:
 
-**Critical rule:** surface-level copying is prohibited. A benchmark is a source of engineering principles, not a source of code to clone.
+- Board/C-Suite governance;
+- departmental specialization;
+- Safety VETO;
+- authoritative budget governance;
+- durable workflow execution;
+- high-integrity memory;
+- reliable routing;
+- distributed execution;
+- observability and auditability;
+- model/provider abstraction;
+- human-in-the-loop control;
+- enterprise security;
+- explicit policy authority.
 
-## 3. Benchmark Matrix
+---
 
-| Subsystem | Primary Benchmark | Secondary Benchmark | SWARM Native Advantage |
+# 2. Operating Rules
+
+1. No implementation is considered necessary merely because a benchmark project has a feature.
+2. We copy **engineering principles**, never external implementation blindly.
+3. Every benchmark must be analyzed for both strengths and failure modes.
+4. Current SWARM behavior must be audited before designing replacement behavior.
+5. Each subsystem receives a **Build Blueprint**, not a loose improvement checklist.
+6. Implementation is deferred until the blueprint contains contracts, boundaries, state models, failure semantics, migration, tests, and acceptance criteria.
+7. A design is not considered complete because it is elegant; it is complete when its invariants and operational behavior are explicit.
+
+---
+
+# 3. Benchmark Matrix
+
+| Subsystem | Primary Benchmark | Secondary Benchmark | SWARM-Native Differentiator |
 |---|---|---|---|
 | Memory | Letta | LangGraph | Governance Memory + organizational scope |
-| Stateful Execution | LangGraph | Microsoft Agent Framework | Governance-aware checkpoints |
-| Workflow | LangGraph | Microsoft Agent Framework | Policy-aware orchestration |
-| Agent Runtime | Microsoft Agent Framework | LangGraph | Board/C-Suite governance |
+| Workflow Engine | Microsoft Agent Framework | LangGraph | Governance-aware durable workflow |
+| Stateful Execution | LangGraph | Microsoft Agent Framework | Policy-aware checkpoints |
+| Agent Runtime | Microsoft Agent Framework | LangGraph | Board/C-Suite authority |
 | Organizational Agents | MetaGPT | Microsoft Agent Framework | Enterprise hierarchy |
 | Knowledge/RAG | LlamaIndex | Letta | Governed knowledge access |
-| Observability | Microsoft Agent Framework / LangGraph ecosystem | — | Governance + cost telemetry |
+| Observability | Microsoft Agent Framework / LangGraph ecosystem | — | Governance + budget telemetry |
 | Model Runtime | Microsoft Agent Framework | LlamaIndex | Policy-driven model selection |
 | HITL | LangGraph | Microsoft Agent Framework | Authority hierarchy |
 | Safety | SWARM-native | External patterns | Safety VETO |
 | Budget | SWARM-native | — | CFO authority |
 | Governance | SWARM-native | Microsoft Agent Framework | Board/C-Suite authority |
 
-Benchmarks are references, not default dependencies.
+Benchmarks are references, not automatic dependencies.
 
-## 4. Architecture Principles
+---
 
-1. Untrusted input never grants privilege.
-2. Financial authority is server-side.
-3. Budget reservations are atomic and concurrency-safe.
-4. Approval is not execution success.
-5. Every execution and side effect has globally unique identity.
-6. Irreversible side effects are idempotent/retry-safe.
-7. Long-running execution survives worker failure.
-8. Policy is evaluated before privileged action.
-9. Execution state, memory, audit, policy decisions, and artifacts are distinct state classes.
-10. Completion requires evidence, not a passing demo.
+# 4. Global Architecture Principles
 
-## 5. Competitive Evolution Matrix
+1. **Untrusted input never grants privilege.**
+2. **Financial authority is server-side.**
+3. **Budget reservations are atomic and concurrency-safe.**
+4. **Approval is not execution success.**
+5. **Every execution and side effect has globally unique identity.**
+6. **Irreversible side effects are idempotent or explicitly protected.**
+7. **Long-running work survives worker failure when durability is required.**
+8. **Policy is evaluated before privileged action.**
+9. **Execution state, memory, audit records, policy decisions, and artifacts are distinct state classes.**
+10. **Evidence is required for completion.**
+11. **No workflow may silently manufacture a successful result from a failed real execution.**
+12. **Horizontal scaling must not multiply authoritative limits.**
+13. **Every bounded resource must have explicit limits.**
+14. **A benchmark's unresolved weaknesses must be considered part of its benchmark analysis.**
 
-| Domain | Target | Primary Work |
+---
+
+# 5. Target Evolution Matrix
+
+| Domain | Target | Research / Build Principle |
 |---|---:|---|
 | Memory | 9.5/10 | Letta + LangGraph adaptation |
-| Workflow | 9.5/10 | Durable graph/state execution |
+| Workflow Engine | 9.5/10 | MAF + LangGraph durable workflow model |
 | Routing | 9/10 | Capability + confidence + ambiguity-aware routing |
-| Durability | 9.5/10 | Checkpoints + jobs + recovery |
-| Observability | 9.5/10 | Tracing + cost/token telemetry + audit correlation |
+| Durability | 9.5/10 | Durable jobs + checkpoints + recovery |
+| Observability | 9.5/10 | Distributed tracing + governance/cost telemetry |
 | Safety | 10/10 | Authoritative policy boundary |
-| Governance | 10/10 | Formal authority/invariants |
-| Budget | 10/10 | Atomic reservations + ledger + reconciliation |
+| Governance | 10/10 | Formal authority and invariants |
+| Budget | 10/10 | Atomic reservation + ledger + reconciliation |
 | Inter-Agent Bus | 9/10 | Delivery semantics + dedup + retry + acknowledgement |
 | Model Registry | 9.5/10 | Single authoritative registry |
-| HITL | 9.5/10 | Durable approvals + enforcement |
-| Testing | 10/10 | Concurrency + chaos + property + recovery |
+| HITL | 9.5/10 | Durable approval state |
+| Testing | 10/10 | Security + concurrency + chaos + recovery + property tests |
 
-Scores are engineering targets, not objective industry rankings.
+These scores are internal engineering targets, not objective industry rankings.
 
-# 6. MEMORY DEEP DIVE
+---
 
-## 6.1 Current MemoryEngine Audit
+# 6. MEMORY DEEP DIVE — COMPLETED
 
-The audited file is `swarm/core/memory_engine.py`. It declares four layers: `SCRATCHPAD`, `WORKING`, `EPISODIC`, and `SEMANTIC`. `MemoryEntry` stores identity, layer, task, agent, content, timestamps, tags, confidence, and access metadata. `Lesson` stores task/agent, pattern, lesson, confidence, creation time, and application count.
+## 6.1 Current MemoryEngine Baseline
 
-### Strengths
+The audited file is `swarm/core/memory_engine.py`.
 
-- Correct recognition that memory needs multiple layers.
-- Explicit task/agent metadata.
-- Confidence and access metadata.
-- Separate lesson abstraction.
-- Basic local synchronization through `RLock`.
-- Intended integration boundary for Vault and search.
+The current implementation defines four memory layers:
 
-### Critical Findings
+```text
+SCRATCHPAD
+WORKING
+EPISODIC
+SEMANTIC
+```
 
-| ID | Finding | Severity | Required Direction |
+It also defines a `Lesson` abstraction.
+
+The current engine stores its data in Python dictionaries/lists, uses `RLock` for local synchronization, generates identifiers using `int(time.time())`, and exposes placeholder Vault/Meilisearch integrations. The context builder currently includes scratchpad, working memory, and a small recent episodic slice but does not perform true semantic or lesson retrieval and does not enforce its `max_tokens` parameter. fileciteturn15file0L2-L7
+
+### Positive foundations
+
+- Memory is already conceptually layered.
+- Task and agent metadata exists.
+- Confidence/access metadata exists.
+- Lessons are separated from normal entries.
+- Local mutation protection exists.
+- The code already anticipates external persistence/search boundaries.
+
+### Critical findings
+
+| ID | Finding | Severity | Build Direction |
 |---|---|---|---|
-| MEM-001 | Vault persistence is a stub | CRITICAL | Real repository adapter with durable transactions |
-| MEM-002 | Meilisearch integration is a stub | HIGH | Real indexing/search adapter |
-| MEM-003 | Core stores are process-local | CRITICAL | Durable production backend |
-| MEM-004 | IDs use `int(time.time())` | HIGH | UUID/ULID/UUIDv7-style global IDs |
-| MEM-005 | No authorization boundary | CRITICAL | Policy-enforced reads/writes |
-| MEM-006 | No tenant/execution/policy provenance envelope | CRITICAL | Full provenance metadata |
-| MEM-007 | Semantic promotion condition is effectively unreachable | HIGH | Explicit promotion lifecycle |
-| MEM-008 | `search_semantic()` is topic substring matching | HIGH | Real relevance retrieval |
-| MEM-009 | `build_context()` does not retrieve semantic/lesson memory | HIGH | Relevance-driven context assembly |
-| MEM-010 | `max_tokens` is ignored | HIGH | Real token accounting/budgeting |
-| MEM-011 | Mutable entries escape the lock boundary | HIGH | Immutable snapshots / controlled mutation |
-| MEM-012 | Confidence is caller-controlled | HIGH | Trust/calibration/provenance model |
-| MEM-013 | Lesson retrieval is substring matching | MEDIUM | Ranked/semantic lesson retrieval |
-| MEM-014 | Lesson application is only a counter | MEDIUM | Application audit + outcome linkage |
-| MEM-015 | No retention/deletion/revocation lifecycle | CRITICAL | Lifecycle policy |
-| MEM-016 | No poisoning/taint model | CRITICAL | Trust classification + enforcement |
-| MEM-017 | Knowledge and governance authority are not separated | CRITICAL | Dedicated Governance Memory boundary |
-| MEM-018 | `RLock` is not distributed consistency | CRITICAL | Versioning + CAS/transaction semantics |
-| MEM-019 | Checkpoint state is not separated architecturally | HIGH | Dedicated execution checkpoint subsystem |
-| MEM-020 | Failed persistence cannot be distinguished from success | CRITICAL | Transactional write contract |
-| MEM-021 | A second context subsystem exists outside MemoryEngine | HIGH | Unify context/memory contracts without duplicating responsibilities |
+| MEM-001 | Vault persistence is a stub | CRITICAL | Durable repository adapter |
+| MEM-002 | Meilisearch is a stub | HIGH | Real indexing/search adapter |
+| MEM-003 | Core stores are process-local | CRITICAL | Durable backend |
+| MEM-004 | IDs use `int(time.time())` | HIGH | Global UUID/ULID/UUIDv7-style IDs |
+| MEM-005 | No memory authorization boundary | CRITICAL | Policy-enforced reads/writes |
+| MEM-006 | Provenance/tenant/execution metadata incomplete | CRITICAL | Full metadata envelope |
+| MEM-007 | Semantic promotion condition is internally ineffective | HIGH | Explicit promotion lifecycle |
+| MEM-008 | Semantic search is topic substring matching | HIGH | Real relevance retrieval |
+| MEM-009 | Context assembly omits semantic/lesson retrieval | HIGH | Retrieval pipeline |
+| MEM-010 | `max_tokens` is ignored | HIGH | Real token budgeting |
+| MEM-011 | Mutable entries escape lock boundary | HIGH | Immutable snapshots / controlled mutation |
+| MEM-012 | Confidence is caller-controlled | HIGH | Trust/provenance/calibration |
+| MEM-013 | Lesson retrieval is substring matching | MEDIUM | Ranked/semantic retrieval |
+| MEM-014 | Lesson application is only a counter | MEDIUM | Execution-linked audit |
+| MEM-015 | No retention/deletion/revocation | CRITICAL | Lifecycle policy |
+| MEM-016 | No poisoning/taint model | CRITICAL | Trust classification |
+| MEM-017 | Governance authority is mixed with knowledge | CRITICAL | Dedicated Governance Memory |
+| MEM-018 | `RLock` is not distributed consistency | CRITICAL | Versioning + CAS/transactions |
+| MEM-019 | Checkpoint state is not separated from memory | HIGH | Dedicated checkpoint subsystem |
+| MEM-020 | Failed persistence cannot be proven successful/unsuccessful | CRITICAL | Transactional write contract |
+| MEM-021 | A parallel context subsystem exists | HIGH | Unified domain model, separate responsibilities |
 
-### Source-level evidence
+## 6.2 Dependency Audit
 
-The implementation stores scratchpad/working/episodic/semantic/lessons in Python dictionaries/lists. IDs are generated with `int(time.time())`. `save_to_vault()` and `load_from_vault()` contain no serialization or I/O, while `search_meilisearch()` returns an empty list. `build_context()` retrieves scratchpad and working data plus the last five episodes, but leaves semantic and lesson sections empty. `max_tokens` is accepted but never enforced.
-
-The current `record_episode()` immediately calls `_maybe_promote_to_semantic()`, but the promotion predicate requires `access_count >= 3` while a newly created entry has `access_count == 0`. No access increment is performed before that call.
-
-## 6.2 Dependency Audit — Completed
-
-A full repository search was performed against the supplied repository snapshot.
-
-### 6.2.1 Direct MemoryEngine consumers
-
-The result is architecturally important:
+The repository audit found:
 
 - `swarm/core/__init__.py` exports `MemoryEngine`.
 - `swarm/core/memory_engine.py` defines it.
-- `tests/unit/test_memory_engine.py` is its direct unit-test suite.
-- No production module under `swarm/` was found importing or calling `MemoryEngine` methods such as `build_context()`, `record_episode()`, `update_working()`, `search_semantic()`, or `get_relevant_lessons()`.
+- `tests/unit/test_memory_engine.py` directly tests it.
+- No production module under the supplied `swarm/` tree was found importing or calling the main `MemoryEngine` methods.
 
-**Conclusion:** the current `MemoryEngine` is effectively an **orphaned/unintegrated subsystem**. It exists as a public core component and has tests, but the repository snapshot does not demonstrate a production execution path that actually depends on it.
+Therefore the current `MemoryEngine` is effectively an **orphaned/unintegrated subsystem** rather than the proven production memory path.
 
-This changes the migration strategy: do not perform a blind in-place rewrite and assume the whole system will use it. First establish the authoritative memory contract, then integrate the new service into the real execution path.
-
-### 6.2.2 Parallel Context System
-
-`swarm/intelligence/context_manager.py` defines `HierarchicalContextManager` with GLOBAL/TASK/AGENT/EPHEMERAL scopes, TTLs, priorities, snapshots, and disk-backed JSON state. `swarm/intelligence/context_compactor.py` actively consumes this manager.
-
-This means SWARM currently has **two overlapping state/context concepts**:
+A second context subsystem exists under `swarm/intelligence/context_manager.py` and is consumed by the context-compaction layer. The current architecture therefore has overlapping concepts:
 
 ```text
 MemoryEngine
@@ -159,68 +184,49 @@ ContextManager
   GLOBAL / TASK / AGENT / EPHEMERAL + snapshots + compaction
 ```
 
-The correct solution is not to keep both as independent long-term memory systems. V2 must define one authoritative **Memory/Context domain model** with a clear separation between:
+The target is one authoritative **Memory/Context domain model** with distinct responsibilities for:
 
 - active execution context;
 - durable memory;
-- context compaction;
-- execution checkpoints;
+- compaction;
+- workflow checkpoints;
 - governance records.
 
-### 6.2.3 Vault Dependency
+### Test evidence
 
-`swarm/api/rest_server.py` exposes a `/vault/search` proxy and reads `VAULT_SERVER_URL` and `VAULT_API_KEY`. `config_loader.py` exposes Vault configuration. However, the supplied repository snapshot contains no `vault_client.py` or `vault_server.py` at the project root even though `tests/e2e/test_vault_integration.py` imports and executes them.
+The unit suite for the current MemoryEngine reports 16 passing tests in the audited environment. The Vault E2E path is not valid evidence of production persistence because the imported `vault_client` dependency is missing in the repository snapshot.
 
-Therefore the E2E Vault test cannot currently be treated as proof that MemoryEngine persistence works.
+The existing tests prove local behavior; they do not prove distributed durability, authorization, memory poisoning resistance, or production persistence. fileciteturn17file0L2-L7
 
-### 6.2.4 Meilisearch Dependency
+## 6.3 Letta — Principles Selected
 
-`pyproject.toml` has no Meilisearch dependency. The MemoryEngine only contains placeholder methods and does not demonstrate a configured client, index lifecycle, schema/settings, consistency mechanism, or recovery process.
+Letta treats memory blocks as first-class context primitives with explicit labels/descriptions/values/limits, supports read-only blocks, and allows explicit attachment/detachment/shared access.
 
-### 6.2.5 Test Evidence
+SWARM adopts these principles conceptually:
 
-`pytest -q tests/unit/test_memory_engine.py` completed with **16 passed**.
+1. Explicit bounded working/core memory.
+2. Memory semantics are part of the contract.
+3. Read-only memory is a first-class capability.
+4. Scope/attachment is explicit.
+5. High-value information stays close to context; large/low-frequency knowledge stays in external retrieval.
+6. Shared memory is explicitly authorized.
 
-`pytest -q tests/unit/test_memory_engine.py tests/e2e/test_vault_integration.py` failed during collection because `vault_client` is missing:
+The important adaptation is that SWARM will **not** copy last-write-wins behavior for governance-sensitive memory; such state requires versions and conflict control.
 
-```text
-ModuleNotFoundError: No module named 'vault_client'
-```
+## 6.4 LangGraph — Principles Selected
 
-This is an important distinction:
+LangGraph provides an explicit separation between execution checkpoints and long-term memory stores, with namespaces and durable persistence/recovery semantics.
 
-> The MemoryEngine unit tests passing proves current local behavior, not production durability, distributed correctness, authorization, or persistence correctness.
-
-## 6.3 Letta Benchmark — Principles to Adapt
-
-Letta treats memory blocks as first-class context primitives. Blocks have explicit labels/descriptions/values/limits, can be read-only, and can be attached/detached or shared. Its context hierarchy separates small high-value in-context memory from larger archival/external retrieval.
-
-SWARM should adopt:
-
-1. Explicit bounded core/working memory.
-2. Semantic descriptions as part of memory contracts.
-3. Read-only memory for authoritative information.
-4. Explicit attachment/scope semantics.
-5. Hierarchical placement based on importance and size.
-6. Shared memory only through explicit access boundaries.
-
-Do **not** copy Letta's last-write-wins behavior for governance-sensitive shared state; concurrent writers require version/conflict control.
-
-## 6.4 LangGraph Benchmark — Principles to Adapt
-
-LangGraph explicitly separates thread/execution checkpoints from long-term memory stores and uses namespaces for durable memory. Checkpoints support persistence, recovery, HITL, and resumability.
-
-SWARM should adopt:
+SWARM adopts:
 
 1. **Checkpoint != Long-Term Memory.**
 2. Durable execution state.
 3. Namespaced long-term memory.
 4. Explicit persistence contracts.
 5. Recovery semantics.
-6. Intermediate-write recovery where appropriate.
-7. Storage-growth policies.
+6. Growth-control strategies for persistent state.
 
-## 6.5 SWARM Memory V2 Architecture
+## 6.5 SWARM Memory V2 Target
 
 ```text
                          SWARM MEMORY FABRIC
@@ -255,92 +261,17 @@ SWARM should adopt:
                               AGENT/LLM
 ```
 
-### Working/Core Memory
+### Memory layers
 
-Small, high-value, immediately available information: current objective, active plan, constraints, role context, and critical project facts. It must be bounded, scoped, versioned, and optionally read-only.
+**Working/Core:** bounded active context, critical task information, current plan, constraints, role context.
 
-### Episodic Memory
+**Episodic:** execution history, outcomes, decisions, failures, lessons, causal links.
 
-Durable execution history: observations, decisions, failures, outcomes, lessons, and causal links.
+**Knowledge/Archival:** large or low-frequency durable information with lexical/semantic retrieval and metadata filters.
 
-### Knowledge/Archival Memory
+**Governance Memory:** Board/C-Suite decisions, safety VETO decisions, policy versions, budget approvals, human approvals, exceptions, governance evidence. Ordinary agents must not mutate this layer.
 
-Large or low-frequency durable information with lexical/semantic retrieval, metadata filtering, namespace filtering, permission filtering, relevance ranking, and provenance.
-
-### Governance Memory
-
-SWARM-native authoritative history:
-
-- Board decisions;
-- C-Suite decisions;
-- Safety VETO decisions;
-- policy versions;
-- budget approvals;
-- human approvals;
-- policy exceptions;
-- governance evidence.
-
-Ordinary agents must not mutate governance memory.
-
-### Execution Checkpoints
-
-Checkpoints belong to the execution subsystem, not the memory layer. They store resumable execution state such as execution ID, workflow stage, active agents, pending writes, policy references, budget reservation references, retry state, deadline, and checkpoint version.
-
-## 6.6 Target Memory Contract
-
-```text
-MemoryRecord
-├── id: GlobalMemoryId
-├── tenant_id
-├── organization_id
-├── department_id
-├── agent_id
-├── execution_id
-├── task_id
-├── layer
-├── scope
-├── content
-├── summary
-├── tags
-├── source
-├── provenance
-├── trust_level
-├── confidence
-├── created_at
-├── updated_at
-├── expires_at
-├── version
-├── supersedes_id
-├── revoked_at
-└── policy_context
-```
-
-The exact storage schema is implementation-dependent and must be finalized against the repository's chosen persistence technology.
-
-## 6.7 Memory Policy Engine
-
-```text
-Agent Request
-     |
-     v
-Memory Policy Engine
-     |
- +---+---+---+---+
- |   |   |   |   |
-Auth Scope Trust Retention Classification
-     |
-     v
-Allow / Deny / Filter / Redact
-     |
-     v
-Memory Backend
-```
-
-Authorization must happen before retrieval/context injection. Confidence must never equal authorization.
-
-## 6.8 Trust Model
-
-Initial levels:
+### Trust levels
 
 ```text
 UNTRUSTED
@@ -351,329 +282,1343 @@ VERIFIED
 GOVERNANCE_AUTHORITY
 ```
 
-Trust is metadata and evidence, not a privilege escalation mechanism.
+Trust is metadata and evidence, not authorization.
 
-## 6.9 Write Invariants
+### Memory invariants
 
-1. Every write gets a globally unique ID.
+1. Every write has a globally unique ID.
 2. Every write is attributable to actor and execution.
-3. Every write has tenant/scope context.
-4. Every write has layer and trust classification.
-5. Governance memory is protected by an authoritative policy boundary.
-6. Shared mutable memory uses version/conflict semantics.
-7. Failed persistence cannot be reported as success.
-8. Writes are observable and auditable.
-9. External/untrusted memory cannot directly alter policy authority.
+3. Tenant/scope context is mandatory.
+4. Trust/provenance are first-class.
+5. Governance memory is protected.
+6. Shared mutable state uses version/conflict semantics.
+7. Failed persistence cannot be returned as successful.
+8. Authorization precedes retrieval.
+9. Context assembly has a real token budget.
+10. Revoked/expired memory is excluded.
+11. Relevance and authority are separate dimensions.
+12. Memory cannot grant privilege.
 
-## 6.10 Retrieval Invariants
+### Status
 
-1. Authorization precedes retrieval.
-2. Scope filters are mandatory.
-3. Revoked/expired memory is excluded.
-4. Relevance and authority are separate dimensions.
-5. Confidence is not authorization.
-6. Untrusted memory is explicitly classified internally.
-7. Context assembly enforces a real token budget.
-8. Retrieval returns provenance.
-9. Governance records are separated from ordinary knowledge in context.
+Memory **research + architecture design + dependency audit are complete**. Implementation is intentionally deferred.
 
-## 6.11 Concurrency Model
+---
 
-The current `RLock` protects one Python process only. V2 requires:
+# 7. WORKFLOW ENGINE BUILD BLUEPRINT
 
-- optimistic versioning;
-- compare-and-swap or equivalent conflict detection;
-- durable transaction semantics;
-- idempotency keys;
-- explicit conflict resolution;
-- no silent last-write-wins for governance-sensitive state.
+## 7.1 Mission
 
-## 6.12 Persistence Architecture
+The existing SWARM workflow subsystem should not merely be "improved". It should be transformed from a **DAG builder + per-agent FSM** into a proper **durable workflow runtime** capable of deterministic planning, concurrent execution, checkpointing, recovery, policy enforcement, human approval, observability, and safe retries.
 
-```text
-MemoryService
-    |
-    +-- PolicyEngine
-    +-- ContextAssembler
-    +-- MemoryRepository
-    +-- SearchIndex
-    +-- AuditSink
+The target is:
 
-ExecutionService
-    |
-    +-- CheckpointRepository
-```
+> **A policy-aware, durable, stateful, event-driven workflow engine specifically designed for SWARM's Board/C-Suite/Department/Agent organization.**
 
-The in-memory backend may remain for tests/development. Production must use an explicit durable backend.
+This is a **build blueprint**, not an implementation task.
 
-## 6.13 Context Assembly Target
+---
+
+## 7.2 Current SWARM Workflow Baseline
+
+The primary workflow files audited are:
 
 ```text
-1. Validate execution/agent identity
-2. Evaluate memory policy
-3. Load working/core memory
-4. Retrieve relevant episodic history
-5. Retrieve relevant knowledge
-6. Load applicable governance references separately
-7. Apply trust/provenance filters
-8. Deduplicate/supersede conflicts
-9. Rank by relevance + freshness + authority + trust
-10. Enforce token budget
-11. Attach provenance metadata
-12. Return immutable context snapshot
+swarm/core/task_dag.py
+swarm/core/agent_state_machine.py
 ```
 
-## 6.14 Migration Strategy
+The current `task_dag.py` defines:
 
-Do not immediately delete the current `MemoryEngine`.
+- `StageConfig`;
+- `DAGNode`;
+- `DAG`;
+- `DAGBuilder`;
+- task templates;
+- stage libraries;
+- topological ordering;
+- a placeholder for parallel optimization.
 
-1. Establish domain contracts.
-2. Introduce global IDs and versions.
-3. Introduce repository interfaces/adapters.
-4. Add policy enforcement.
-5. Separate checkpoint persistence from memory.
-6. Implement durable storage.
-7. Implement real indexing/retrieval.
-8. Implement Governance Memory.
-9. Integrate the new service into the real execution path.
-10. Migrate callers and `ContextManager` responsibilities deliberately.
-11. Remove direct dictionary/state access.
-12. Remove stubs only after replacement paths are verified.
-13. Validate recovery and rollback.
-
-## 6.15 Memory Validation
-
-Required test classes:
-
-- unit;
-- repository contract;
-- serialization/deserialization;
-- retrieval correctness;
-- authorization;
-- tenant isolation;
-- department/agent scope isolation;
-- poisoning;
-- trust enforcement;
-- deletion/revocation;
-- retention/expiry;
-- concurrent writes;
-- concurrent reads/writes;
-- optimistic conflicts;
-- retry/idempotency;
-- process restart recovery;
-- checkpoint restoration;
-- index consistency;
-- token-budget enforcement;
-- latency/load;
-- property-based invariants.
-
-## 6.16 Memory Acceptance Criteria
-
-Memory V2 is `VERIFIED` only when:
-
-- execution state and long-term memory are structurally separated;
-- persistence is real, not stubbed;
-- every write is attributable;
-- IDs are collision-resistant;
-- authorization exists on reads/writes;
-- tenant/scope isolation is enforced;
-- trust/provenance are first-class;
-- Governance Memory is protected;
-- retrieval is genuinely relevance-based;
-- context assembly enforces token budget;
-- retention/revocation exist;
-- concurrent mutation cannot silently corrupt governance state;
-- failure cannot be reported as successful persistence;
-- recovery is tested;
-- SLOs are defined and met;
-- regression tests cover every fixed critical finding;
-- at least one real production execution path uses the new memory service.
-
-# 7. WORKFLOW PROGRAM
-
-Primary benchmark: LangGraph. Secondary: Microsoft Agent Framework.
-
-Target principles: explicit state, graph transitions, checkpointing, resumability, interrupts/HITL, controlled branching, deterministic recovery boundaries.
-
-SWARM adaptation must include authority, policy, budget, tools, deadlines, compensation, retries, and memory references.
-
-# 8. DURABILITY PROGRAM
+Its templates include stages such as:
 
 ```text
-Control Plane -> Durable Job -> Checkpointed Execution -> Workers -> Recovery/Resume
+analyze
+ideate
+design
+implement
+review
+test
+security_audit
+optimize
+document
+verify
+handoff
 ```
 
-Required: durable job identity, checkpoint versioning, retry-safe side effects, ownership/lease semantics, deadlines, recovery, idempotency, and dead-letter/error handling.
+and the DAG adds sequential edges between consecutive stages. The `_optimize_parallelism()` method currently returns the DAG without implementing actual optimization. fileciteturn25file0L2-L7
 
-# 9. ROUTING PROGRAM
+The `AgentStateMachine` manages individual agent lifecycle states including `IDLE`, `ASSIGNED`, `SCRATCHPAD`, `EXECUTING`, `REVIEW_PENDING`, `APPROVED`, `REJECTED`, `BLOCKED`, `ERROR`, `TIMEOUT`, and `VETOED`. It is therefore an **agent lifecycle FSM**, not a durable workflow state machine. fileciteturn26file0L2-L7
 
-Replace fragile keyword-only routing with capability-aware, confidence-aware, policy-aware routing using capability, classification, confidence, availability, cost, latency, policy, department scope, authority, ambiguity, and fallback signals.
+---
 
-Low-confidence privileged actions must clarify, safely fallback, escalate, or reject.
+## 7.3 Current Workflow Strengths
 
-# 10. SAFETY PROGRAM
+1. A DAG abstraction already exists.
+2. Dependency ordering exists.
+3. Cycle detection exists for sequential dependencies.
+4. Task templates exist.
+5. Stage metadata contains workers, outputs, and constitutional checks.
+6. Agent lifecycle state is already modeled separately.
+7. VETO is represented at agent state level.
+8. The architecture already has the conceptual ingredients required for a richer runtime.
 
-Safety must be an authoritative boundary with centralized policy evaluation, fail-closed protected operations, verified policy configuration, tool authorization, role/tenant-aware policy, explicit VETO semantics, audit records, and no bypass path.
+These are foundations, not evidence of a production workflow engine.
 
-# 11. BUDGET GOVERNANCE PROGRAM
+---
 
-Budget control must be server-authoritative. Required: authoritative pricing/model catalog, atomic reservations, concurrency safety, reconciliation, immutable ledger, execution cost attribution, agent/department budgets, approval thresholds, and fail-closed behavior when budget authority is unavailable.
+## 7.4 Current Workflow Gaps
 
-> Client-reported estimated cost must never authorize spending.
+| ID | Problem | Severity | Required Build Direction |
+|---|---|---|---|
+| WF-001 | `DAGBuilder` plans but does not execute durable workflows | CRITICAL | Build Workflow Runtime |
+| WF-002 | Parallel optimization is a no-op | HIGH | Real scheduler/concurrency model |
+| WF-003 | Current graph wiring is primarily sequential | HIGH | General dependency/branch/merge model |
+| WF-004 | No authoritative workflow-level state object | CRITICAL | `WorkflowExecutionState` |
+| WF-005 | No durable checkpoint system | CRITICAL | `CheckpointStore` |
+| WF-006 | No restart/resume semantics | CRITICAL | Recovery runtime |
+| WF-007 | Retry semantics are not workflow-native | CRITICAL | Retry policy + execution attempt state |
+| WF-008 | Failure compensation is undefined | HIGH | Compensation policy |
+| WF-009 | No workflow-level deadline propagation | HIGH | Deadline/deadline budget |
+| WF-010 | Cancellation is not a first-class workflow state | HIGH | Cooperative cancellation |
+| WF-011 | HITL is not durable workflow state | HIGH | Persistent approval gate |
+| WF-012 | Policy decisions are not modeled as workflow gates | CRITICAL | Policy-aware edges/nodes |
+| WF-013 | Budget reservation state is not part of workflow execution | CRITICAL | Budget reference + reservation lifecycle |
+| WF-014 | Agent FSM and workflow state are not explicitly separated | HIGH | Separate boundaries |
+| WF-015 | Events are not a first-class execution contract | HIGH | Workflow event model |
+| WF-016 | Workflow validation is weak | HIGH | Compile-time/registration validation |
+| WF-017 | Typed input/output contracts are absent at node boundary | HIGH | Schema-backed executor contracts |
+| WF-018 | Subworkflow composition is not a first-class abstraction | MEDIUM | `SubWorkflowExecutor` |
+| WF-019 | Side-effect idempotency is not workflow-enforced | CRITICAL | Idempotency policy per executor |
+| WF-020 | Execution ownership/leases are undefined | CRITICAL | Worker lease model |
+| WF-021 | Replay/time-travel semantics are absent | MEDIUM | Optional state history/replay |
+| WF-022 | No durable event/audit linkage | HIGH | Correlated workflow event stream |
+| WF-023 | Parallel execution lacks bounded resource governance | HIGH | Concurrency/resource quotas |
+| WF-024 | Static template stage durations are not execution scheduling | MEDIUM | Remove false timing assumptions |
 
-# 12. MODEL RUNTIME PROGRAM
+---
 
-Create one authoritative model registry owning provider, model ID, capabilities, context limits, pricing, latency class, reliability, restrictions, fallback chain, and availability. Agents should request capabilities rather than hard-code provider details where practical.
+# 8. WORKFLOW BENCHMARK — MICROSOFT AGENT FRAMEWORK
 
-# 13. INTER-AGENT COMMUNICATION PROGRAM
+## 8.1 What MAF contributes
 
-Define message identity, correlation, ordering, acknowledgement, retries, deduplication, failure handling, dead-letter behavior, authorization, tenant isolation, and trace propagation.
+Microsoft Agent Framework treats workflows as explicit directed structures made from executors and edges. It supports sequential and concurrent orchestration, branching/handoffs, events, workflow validation, checkpoints, human-in-the-loop patterns, and runtime observability. citeturn2search0turn2search1
 
-# 14. OBSERVABILITY PROGRAM
+### Principle A — Executor abstraction
 
-Every execution must be traceable across:
+An executor is a first-class processing unit, not merely a worker-name string.
+
+**SWARM adaptation:**
 
 ```text
-Request -> Execution -> Policy -> Agent -> Model -> Tool -> Memory -> Cost -> Result
+Executor
+├── executor_id
+├── type
+├── input_schema
+├── output_schema
+├── capabilities
+├── policy_requirements
+├── retry_policy
+├── timeout_policy
+├── resource_policy
+└── handler
 ```
 
-Telemetry must include execution/agent/model/tool IDs, latency, tokens, cost, retries, policy decisions, failures, fallback activation, and checkpoint/recovery events without leaking secrets.
+Executor types should include at minimum:
 
-# 15. HUMAN-IN-THE-LOOP PROGRAM
+- Agent;
+- Tool;
+- Function;
+- Human Gate;
+- Validator;
+- Subworkflow;
+- External Service.
 
-Approval is durable state:
+### Principle B — Typed graph edges
+
+Edges are part of the contract between executors rather than an unstructured tuple.
+
+**SWARM adaptation:**
 
 ```text
-NOT_REQUIRED -> PENDING -> APPROVED / REJECTED / EXPIRED / CANCELLED
+WorkflowEdge
+├── source_executor
+├── target_executor
+├── condition
+├── message_schema
+├── policy_gate
+├── delivery_mode
+├── retry_policy
+└── failure_policy
 ```
 
-Records require approver identity, authority context, policy/version, execution ID, requested action, timestamps, expiration, and evidence where appropriate.
+### Principle C — Workflow validation before execution
 
-# 16. ENTERPRISE SECURITY PROGRAM
+A graph must be validated before it is admitted to runtime.
 
-Required: authentication, authorization, tenant isolation, secret management, data classification, artifact security, sandboxing where required, SSRF/path traversal/injection protection, audit logging, and least privilege.
+Validation should cover:
 
-# 17. TESTING AND VERIFICATION PROGRAM
+- connectivity;
+- unreachable nodes;
+- invalid cycles;
+- missing entry/exit;
+- message schema incompatibility;
+- invalid policy references;
+- invalid capabilities;
+- unsupported executor types;
+- conflicting resource constraints.
 
-Required layers:
+### Principle D — Events are first-class
 
-- unit;
-- integration;
-- security;
-- concurrency;
-- failure;
-- chaos;
-- load;
-- property-based testing.
+The workflow runtime should emit structured events for state changes, executor lifecycle, outputs, errors, and policy gates.
 
-The target is proof of invariants, not merely happy-path behavior.
+### Principle E — Concurrent execution has synchronization semantics
 
-# 18. SWARM-NATIVE ADVANTAGES
+MAF's superstep-style execution offers a useful model: gather eligible work, execute compatible work concurrently, establish a synchronization boundary, then move forward. This is useful for SWARM but should not be copied rigidly because long-running and asynchronous operations can require more granular progression.
 
-Preserve and strengthen:
+### Principle F — Checkpoints are runtime infrastructure
 
-- Board governance;
+Durability is part of workflow execution, not an optional memory feature.
+
+---
+
+# 9. WORKFLOW BENCHMARK — LANGGRAPH
+
+## 9.1 What LangGraph contributes
+
+LangGraph models applications around explicit graph state, nodes, edges, persistence/checkpoints, interrupts, and recovery. Its persistence system separates execution checkpoints from longer-lived memory stores and supports replay/time-travel-oriented workflows. citeturn3search0turn3search1
+
+### Principle A — Explicit workflow state
+
+The runtime should operate on a typed state object rather than scattered node-local dictionaries.
+
+### Principle B — Checkpoint after meaningful state transitions
+
+The system needs durable recovery boundaries.
+
+### Principle C — Resume is a native operation
+
+The runtime should have an explicit:
+
+```text
+resume(execution_id, checkpoint_id)
+```
+
+semantic rather than requiring callers to recreate a workflow manually.
+
+### Principle D — Interrupts are state transitions
+
+Human approval, manual correction, or policy interruption must become durable workflow state.
+
+### Principle E — Thread/execution identity is first-class
+
+Every run must have stable identity and state history.
+
+### Principle F — Workflow history must be queryable
+
+A production orchestrator needs:
+
+- current state;
+- prior checkpoints;
+- events;
+- failed attempts;
+- recovery decisions.
+
+### Important adaptation
+
+SWARM should not become a LangGraph clone. Its state model must additionally represent:
+
+- Board authority;
 - C-Suite authority;
-- departmental specialization;
 - safety VETO;
-- CFO/budget governance;
-- organizational hierarchy;
-- governed delegation;
-- explicit policy authority;
-- institutional decision history.
+- budget reservation;
+- department authority;
+- tool capability policy.
 
-These are differentiators, not technical debt.
+---
 
-# 19. GLOBAL ACCEPTANCE MODEL
-
-A subsystem is not complete because code compiles, tests pass, or a demo works. It is verified only when architecture, threat model, invariants, failure behavior, concurrency behavior where relevant, observability, migration safety, regression coverage, and objective evidence exist.
-
-# 20. Implementation Order
+# 10. SWARM WORKFLOW ENGINE V2 — TARGET ARCHITECTURE
 
 ```text
-Phase 0 — Baseline and Contracts
-        |
-Phase 1 — Trust / Safety / Authorization
-        |
-Phase 2 — Execution Correctness / Idempotency / Budget
-        |
-Phase 3 — Durable Workflow / Checkpoints / Recovery
-        |
-Phase 4 — Memory V2
-        |
-Phase 5 — Routing / Communication / Model Runtime
-        |
-Phase 6 — Observability / Audit / Enterprise Operations
-        |
-Phase 7 — Concurrency / Chaos / Load / Security Verification
-        |
-Phase 8 — Benchmark and Optimization
+                         SWARM WORKFLOW ENGINE V2
+                                      |
+                 +--------------------+--------------------+
+                 |                    |                    |
+                 v                    v                    v
+        Workflow Definition      Validator/Compiler     Policy Engine
+                 |                    |                    |
+                 +--------------------+--------------------+
+                                      |
+                                      v
+                              Workflow Runtime
+                                      |
+             +------------------------+------------------------+
+             |                        |                        |
+             v                        v                        v
+       Scheduler                 State Store              Event Stream
+             |                        |                        |
+             v                        v                        v
+       Executor Runtime          Checkpoint Store         Audit/Telemetry
+             |
+      +------+------+------+------+------+------+
+      |      |      |      |      |      |
+    Agent   Tool   Func   Human  Validator Subworkflow External
 ```
 
-Memory is the first competitive deep dive. Its implementation must follow the dependency findings in Section 6 rather than bypass them.
+---
 
-# 21. Status Model
+# 11. WORKFLOW DOMAIN MODEL
+
+## 11.1 WorkflowDefinition
+
+A versioned immutable declaration of the workflow.
 
 ```text
-DISCOVERED
- -> AUDITING
- -> BENCHMARKING
- -> REVERSE_ENGINEERING
- -> DESIGNING
- -> APPROVED
- -> IMPLEMENTING
- -> TESTING
- -> VERIFIED
- -> MONITORED
+WorkflowDefinition
+├── workflow_id
+├── version
+├── entrypoints
+├── executors
+├── edges
+├── state_schema
+├── policies
+├── resources
+├── deadlines
+├── retry_defaults
+├── cancellation_policy
+└── metadata
 ```
 
-`VERIFIED` means evidence-backed acceptance.
+A published definition should be immutable.
 
-# 22. Current Program State
+If the design changes:
+
+```text
+workflow_id = same
+version = incremented
+```
+
+An active execution retains the version with which it started.
+
+## 11.2 WorkflowExecution
+
+```text
+WorkflowExecution
+├── execution_id
+├── workflow_id
+├── workflow_version
+├── tenant_id
+├── actor_id
+├── status
+├── started_at
+├── updated_at
+├── deadline
+├── current_nodes
+├── completed_nodes
+├── failed_nodes
+├── waiting_nodes
+├── attempt_count
+├── checkpoint_id
+├── policy_context
+├── budget_reference
+├── cancellation_state
+└── result_reference
+```
+
+## 11.3 NodeExecution
+
+Each executor invocation gets its own execution record.
+
+```text
+NodeExecution
+├── node_execution_id
+├── execution_id
+├── executor_id
+├── attempt
+├── state
+├── input_reference
+├── output_reference
+├── started_at
+├── completed_at
+├── deadline
+├── retry_state
+├── error_code
+├── policy_decision
+└── idempotency_key
+```
+
+---
+
+# 12. WORKFLOW STATE MACHINE
+
+The workflow engine must have a dedicated state machine.
+
+Recommended states:
+
+```text
+CREATED
+VALIDATING
+REJECTED
+READY
+RUNNING
+WAITING
+WAITING_APPROVAL
+PAUSED
+PARTIAL
+RETRYING
+CANCEL_REQUESTED
+CANCELLED
+FAILED
+COMPLETED
+EXPIRED
+RECOVERY_REQUIRED
+```
+
+### Important separation
+
+```text
+Workflow State
+      !=
+Agent State
+      !=
+Policy State
+      !=
+Budget State
+      !=
+Memory State
+```
+
+They may reference each other but must not collapse into one enum.
+
+---
+
+# 13. EXECUTOR MODEL
+
+Executors are the actual units of work.
+
+## Required executor contract
+
+```text
+ExecutorContract
+├── identity
+├── capability declaration
+├── input validation
+├── output validation
+├── execution handler
+├── timeout policy
+├── retry policy
+├── idempotency policy
+├── resource limits
+└── policy requirements
+```
+
+### Agent Executor
+
+Wraps an SWARM agent while preserving AgentStateMachine semantics.
+
+### Tool Executor
+
+Invokes an external/internal tool and must be capability-authorized.
+
+### HumanGate Executor
+
+Moves workflow into a durable `WAITING_APPROVAL` state.
+
+### Validator Executor
+
+Validates state/output and can fail or branch execution.
+
+### Subworkflow Executor
+
+Starts a child workflow with a parent execution reference.
+
+---
+
+# 14. GRAPH MODEL
+
+The graph must support:
+
+- sequential edges;
+- conditional edges;
+- fan-out;
+- fan-in;
+- parallel branches;
+- error branches;
+- compensation branches;
+- approval branches;
+- subworkflow edges;
+- terminal edges.
+
+An edge is not simply:
+
+```python
+(from_stage, to_stage, edge_type)
+```
+
+It is a typed execution contract.
+
+---
+
+# 15. GRAPH VALIDATION
+
+Workflow admission must reject invalid definitions.
+
+### Structural validation
+
+- duplicate node IDs;
+- undefined edge targets;
+- unreachable nodes;
+- invalid cycles;
+- missing entrypoint;
+- missing terminal path;
+- invalid branch/merge configuration.
+
+### Contract validation
+
+- input/output schema compatibility;
+- capability availability;
+- policy references;
+- resource limits;
+- retry rules;
+- deadline compatibility.
+
+### Governance validation
+
+- privileged executor has policy reference;
+- budgeted operation has budget policy;
+- human gate has approval authority;
+- safety-sensitive nodes cannot bypass Safety policy.
+
+---
+
+# 16. SCHEDULER DESIGN
+
+## Objective
+
+Select which eligible node executions can run without violating:
+
+- graph dependencies;
+- policy;
+- budget;
+- resource quotas;
+- concurrency limits;
+- deadlines;
+- tenant quotas;
+- executor availability.
+
+### Scheduling cycle
+
+```text
+Load Execution State
+        |
+Determine Ready Nodes
+        |
+Evaluate Policy
+        |
+Evaluate Resources
+        |
+Evaluate Budget
+        |
+Create Node Execution Attempts
+        |
+Dispatch Eligible Work
+        |
+Collect Results/Events
+        |
+Commit State
+        |
+Checkpoint
+        |
+Repeat
+```
+
+---
+
+# 17. PARALLEL EXECUTION
+
+Parallelism must be a real runtime behavior, not a metadata flag.
+
+Example:
+
+```text
+                +--> Research A --+
+Start ----------+--> Research B --+--> Synthesis
+                +--> Research C --+
+```
+
+The scheduler must ensure:
+
+- all branches have durable execution IDs;
+- concurrency is bounded;
+- partial branch failure semantics are explicit;
+- fan-in does not run before required inputs are valid;
+- duplicate retries are idempotent;
+- branch results are traceable.
+
+### Synchronization model
+
+SWARM may use bounded synchronization points inspired by MAF supersteps, but must allow long-running/human/asynchronous nodes to remain independently durable instead of blocking an entire workflow unnecessarily.
+
+---
+
+# 18. CHECKPOINTING
+
+Checkpoint is an execution primitive.
+
+## Checkpoint content
+
+```text
+Checkpoint
+├── checkpoint_id
+├── execution_id
+├── workflow_version
+├── state_snapshot
+├── active_nodes
+├── completed_nodes
+├── waiting_nodes
+├── pending_writes
+├── policy_references
+├── budget_reference
+├── retry_state
+├── deadline
+├── schema_version
+├── created_at
+└── checksum/hash
+```
+
+## Checkpoint rules
+
+1. Every durable execution has checkpoints.
+2. Checkpoints are immutable records.
+3. A new checkpoint references its predecessor.
+4. Resume selects a specific checkpoint.
+5. Checkpoint schema is versioned.
+6. Sensitive data is encrypted/protected according to classification.
+7. Failed checkpoint write must not silently advance execution state.
+
+---
+
+# 19. RECOVERY / RESUME
+
+A worker crash must result in:
+
+```text
+Worker failure
+      |
+Lease expires / failure detected
+      |
+Execution becomes RECOVERY_REQUIRED
+      |
+Load latest valid checkpoint
+      |
+Validate checkpoint
+      |
+Reconcile completed side effects
+      |
+Reconstruct ready nodes
+      |
+Resume
+```
+
+Recovery must never blindly replay irreversible side effects.
+
+---
+
+# 20. RETRY MODEL
+
+Every executor declares whether its failure is retryable.
+
+### Retry policy
+
+```text
+retryable
+max_attempts
+backoff
+jitter
+deadline
+retry_budget
+```
+
+### Example
+
+```text
+Validation error       -> no retry
+Authorization denied   -> no retry
+Budget exceeded        -> no retry
+Transient provider 5xx -> bounded retry
+Rate limit             -> retry with server guidance/backoff
+Timeout                -> bounded retry if safe
+Unknown internal      -> limited retry + alert
+```
+
+Retry must be tied to an idempotency policy.
+
+---
+
+# 21. FAILURE AND COMPENSATION
+
+Not every workflow can simply retry.
+
+Each side-effecting executor declares:
+
+```text
+retry strategy
+compensation strategy
+reconciliation strategy
+manual recovery strategy
+```
+
+Example:
+
+```text
+External operation succeeded
+     |
+Worker crashed before commit
+     |
+Recovery checks external idempotency/status
+     |
+Commit or compensate
+```
+
+The engine must distinguish:
+
+```text
+NOT_STARTED
+STARTED_UNKNOWN
+SUCCEEDED
+FAILED
+COMPENSATED
+```
+
+---
+
+# 22. DEADLINES AND TIMEOUTS
+
+The workflow owns an overall deadline.
+
+Child executors receive a remaining-time budget rather than unrelated arbitrary timers.
+
+```text
+Workflow Deadline = 60 min
+        |
+        +-- Node A = remaining budget
+        +-- Node B = remaining budget
+        +-- Node C = remaining budget
+```
+
+A node may have a shorter local timeout but must never exceed workflow deadline.
+
+---
+
+# 23. CANCELLATION
+
+Cancellation is durable workflow state.
+
+```text
+RUNNING
+   |
+CANCEL_REQUESTED
+   |
++--+----------------+
+|                   |
+cooperative stop    non-cancellable side effect
+|                   |
+CANCELLED        RECONCILE
+```
+
+A cancellation request must be traceable and idempotent.
+
+---
+
+# 24. HUMAN-IN-THE-LOOP
+
+Human approval is a workflow executor/state, not a boolean field.
+
+```text
+WAITING_APPROVAL
+        |
+ +------+------+
+ |             |
+APPROVED     REJECTED
+ |             |
+READY         FAILED/REJECTED
+```
+
+Approval record:
+
+```text
+approval_id
+execution_id
+node_execution_id
+requester
+approver
+authority
+policy_version
+requested_action
+reason
+created_at
+expires_at
+decision
+```
+
+An approval does not bypass revalidation at execution time.
+
+---
+
+# 25. POLICY INTEGRATION
+
+Every privileged executor or edge can reference policies.
+
+Policy decisions:
+
+```text
+ALLOW
+DENY
+REQUIRE_APPROVAL
+VETO
+```
+
+The workflow runtime must not implement the details of Safety/Budget/Authorization policy. It asks the authoritative policy engine for a decision and records the decision reference.
+
+### Example
+
+```text
+Ready node
+   |
+Policy Engine
+   |
++--+---------+---------+
+ALLOW    APPROVAL    VETO
+ |          |           |
+run      wait         stop
+```
+
+---
+
+# 26. BUDGET INTEGRATION
+
+The workflow engine must not calculate authoritative prices itself.
+
+Instead:
+
+```text
+Node ready
+   |
+Cost estimation service
+   |
+Budget reservation
+   |
+ALLOW / DENY
+   |
+Execution
+   |
+Actual usage reconciliation
+```
+
+Each `NodeExecution` references its budget reservation.
+
+If budget reservation fails, the node must not start.
+
+---
+
+# 27. MEMORY INTEGRATION
+
+Workflow and Memory must remain separate domains.
+
+Workflow uses Memory through explicit operations:
+
+```text
+load_context()
+write_episode()
+retrieve_knowledge()
+record_outcome()
+```
+
+Workflow checkpoint state is never automatically written into long-term memory as knowledge.
+
+Likewise, retrieved memory cannot mutate workflow authority.
+
+---
+
+# 28. EVENT MODEL
+
+Every major workflow transition emits an immutable event.
+
+```text
+WorkflowCreated
+WorkflowValidated
+WorkflowStarted
+NodeReady
+NodeStarted
+NodeCompleted
+NodeFailed
+NodeRetryScheduled
+PolicyEvaluated
+ApprovalRequested
+ApprovalReceived
+CheckpointCreated
+CheckpointRestored
+WorkflowPaused
+WorkflowResumed
+WorkflowCancelled
+WorkflowCompleted
+WorkflowFailed
+RecoveryRequired
+```
+
+Event envelope:
+
+```text
+Event
+├── event_id
+├── event_type
+├── execution_id
+├── workflow_id
+├── workflow_version
+├── node_execution_id
+├── actor
+├── timestamp
+├── correlation_id
+├── causation_id
+├── schema_version
+└── payload
+```
+
+---
+
+# 29. OBSERVABILITY
+
+Tracing hierarchy:
+
+```text
+Workflow Trace
+  ├── Node Span
+  │    ├── Agent Span
+  │    ├── Model Span
+  │    ├── Tool Span
+  │    └── Memory Span
+  └── Policy/Budget Spans
+```
+
+Metrics must include:
+
+- workflow success/failure;
+- node success/failure;
+- p50/p95/p99 latency;
+- queue/scheduler latency;
+- retries;
+- recovery count;
+- checkpoint duration;
+- waiting/approval time;
+- budget consumption;
+- executor saturation;
+- concurrency;
+- cancellation;
+- partial executions.
+
+---
+
+# 30. DISTRIBUTED EXECUTION
+
+The final runtime must support multiple workers without changing workflow semantics.
+
+Required concepts:
+
+- durable execution IDs;
+- worker leases;
+- heartbeats;
+- ownership expiration;
+- duplicate-delivery protection;
+- idempotency keys;
+- durable scheduler state;
+- distributed concurrency limits;
+- tenant quotas.
+
+Process-local dictionaries are not authoritative workflow state.
+
+---
+
+# 31. SECURITY MODEL
+
+Workflow security boundaries:
+
+1. Caller cannot directly modify workflow state.
+2. Caller cannot skip policy gates.
+3. Caller cannot choose privileged executors without authorization.
+4. Workflow definitions are immutable after publication.
+5. Workflow execution belongs to an authorized tenant/scope.
+6. Executor input is validated.
+7. Tool side effects are capability-controlled.
+8. Checkpoints cannot become privilege escalation artifacts.
+9. Replay/resume requires execution authorization.
+10. Audit events cannot be silently rewritten.
+
+---
+
+# 32. RESOURCE GOVERNANCE
+
+Every workflow may declare or inherit limits:
+
+```text
+max_runtime
+max_nodes
+max_depth
+max_parallelism
+max_agent_calls
+max_tool_calls
+max_tokens
+max_cost
+max_retries
+max_subworkflows
+```
+
+A workflow exceeding a hard limit must transition to an explicit resource failure state rather than continuing indefinitely.
+
+---
+
+# 33. SUBWORKFLOWS
+
+A workflow can call another workflow through a first-class `SubworkflowExecutor`.
+
+Parent-child relationship:
+
+```text
+Parent Execution
+      |
+      +--> Child Execution
+               |
+               +--> Child checkpoints
+               +--> Child events
+               +--> Child result
+```
+
+Required controls:
+
+- depth limit;
+- tenant inheritance;
+- policy inheritance/override rules;
+- budget propagation;
+- deadline propagation;
+- cancellation propagation;
+- parent-child correlation.
+
+---
+
+# 34. VERSIONING
+
+Workflow definitions are immutable once published.
+
+Execution always stores:
+
+```text
+workflow_id
+workflow_version
+```
+
+An execution never silently switches to a newer workflow definition.
+
+Schema versions apply independently to:
+
+- workflow definition;
+- workflow state;
+- checkpoint;
+- event;
+- executor message.
+
+---
+
+# 35. PERFORMANCE MODEL
+
+Performance should be measured, not guessed.
+
+Required benchmark dimensions:
+
+- graph compilation latency;
+- scheduling latency;
+- node dispatch latency;
+- checkpoint latency;
+- state serialization cost;
+- event emission latency;
+- recovery latency;
+- concurrent workflows;
+- concurrent nodes;
+- memory footprint;
+- throughput under provider latency.
+
+Target SLOs must be defined after baseline measurement.
+
+---
+
+# 36. TESTING STRATEGY
+
+## Unit
+
+- graph validation;
+- state transitions;
+- edge conditions;
+- scheduler decisions;
+- retry policy;
+- timeout calculations;
+- policy gate handling.
+
+## Integration
+
+- checkpoint backend;
+- worker lease;
+- event store;
+- policy engine;
+- budget reservation;
+- memory context;
+- executor adapters.
+
+## Concurrency
+
+- duplicate workers;
+- parallel branches;
+- fan-in races;
+- lease races;
+- cancellation races;
+- budget races.
+
+## Failure
+
+- worker crash;
+- provider outage;
+- checkpoint failure;
+- event sink failure;
+- policy backend unavailable;
+- budget backend unavailable.
+
+## Recovery
+
+- resume from latest checkpoint;
+- resume after partial branch completion;
+- retry safe nodes;
+- reconcile side effects;
+- prevent duplicate execution.
+
+## Security
+
+- workflow injection;
+- unauthorized resume;
+- unauthorized executor;
+- policy bypass;
+- tenant isolation;
+- malicious executor input.
+
+## Load/Chaos
+
+- many concurrent workflows;
+- large DAG;
+- long-running nodes;
+- random worker termination;
+- dependency failure;
+- event-store degradation.
+
+---
+
+# 37. MIGRATION STRATEGY
+
+The existing DAG builder should not be deleted immediately.
+
+### Stage 1 — Domain introduction
+
+Add the conceptual contracts:
+
+```text
+WorkflowDefinition
+WorkflowExecution
+NodeExecution
+WorkflowEdge
+ExecutorContract
+Checkpoint
+WorkflowEvent
+```
+
+### Stage 2 — Compatibility adapter
+
+Represent current `StageConfig` and `DAGBuilder` output as a legacy workflow definition.
+
+### Stage 3 — Validator/compiler
+
+Compile legacy definitions into the new execution model.
+
+### Stage 4 — Runtime
+
+Introduce the durable scheduler/executor runtime.
+
+### Stage 5 — State separation
+
+Separate:
+
+- AgentStateMachine;
+- WorkflowStateMachine;
+- Policy state;
+- Budget state;
+- Memory;
+- Checkpoints.
+
+### Stage 6 — Replace old execution path
+
+Move real production execution to the new runtime.
+
+### Stage 7 — Deprecate legacy DAG runtime behavior
+
+Only after compatibility, integration, recovery, and performance are verified.
+
+---
+
+# 38. ROLLBACK STRATEGY
+
+The rollout must support safe rollback.
+
+Required:
+
+- workflow version pinning;
+- feature flag/route selection;
+- legacy adapter;
+- state migration compatibility;
+- event compatibility;
+- checkpoint compatibility;
+- explicit rollback criteria.
+
+Rollback must not orphan in-flight executions.
+
+---
+
+# 39. WORKFLOW BUILD ORDER
+
+```text
+Phase W0 — Domain Contracts
+        |
+Phase W1 — Workflow Definition + Validation
+        |
+Phase W2 — Execution State Machine
+        |
+Phase W3 — Executor Runtime
+        |
+Phase W4 — Scheduler + Parallelism
+        |
+Phase W5 — Checkpoint Store
+        |
+Phase W6 — Retry/Timeout/Cancel/Recovery
+        |
+Phase W7 — Policy + Budget + HITL Gates
+        |
+Phase W8 — Events + Observability
+        |
+Phase W9 — Distributed Workers
+        |
+Phase W10 — Migration + Production Verification
+```
+
+Implementation is intentionally not included in this program phase.
+
+---
+
+# 40. WORKFLOW ACCEPTANCE CRITERIA
+
+Workflow V2 can be marked `VERIFIED` only when:
+
+1. A workflow definition is versioned and validated before execution.
+2. Executors have typed contracts.
+3. Graph edges support conditional/parallel/fan-in/fan-out semantics.
+4. Workflow state is authoritative and durable.
+5. Checkpoints are immutable and recoverable.
+6. A crashed worker can be replaced without losing the workflow.
+7. Duplicate worker delivery cannot cause unsafe duplicate side effects.
+8. Retry rules are explicit and bounded.
+9. Deadlines propagate.
+10. Cancellation is durable.
+11. HITL is durable.
+12. Policy gates are authoritative.
+13. Budget reservation occurs before protected execution.
+14. Events provide a complete execution trail.
+15. Observability links workflow → node → agent → model/tool.
+16. Distributed workers preserve execution semantics.
+17. Resource limits are enforced.
+18. Security tests demonstrate privilege boundaries.
+19. Chaos/recovery tests pass.
+20. At least one real production workflow runs entirely on the new runtime.
+
+---
+
+# 41. WORKFLOW COMPETITIVE SCORECARD
+
+| Capability | SWARM Current | Benchmark Principle | SWARM V2 Target |
+|---|---:|---|---:|
+| DAG definition | 7/10 | MAF/LangGraph graph model | 10/10 |
+| Workflow state | 4/10 | LangGraph state model | 10/10 |
+| Runtime execution | 3/10 | MAF executor runtime | 10/10 |
+| Parallelism | 3/10 | MAF concurrency | 10/10 |
+| Checkpointing | 1/10 | MAF + LangGraph persistence | 10/10 |
+| Recovery | 1/10 | LangGraph resume semantics | 10/10 |
+| HITL | 4/10 | MAF/LangGraph interrupts | 10/10 |
+| Policy integration | 5/10 | SWARM-native | 10/10 |
+| Budget integration | 4/10 | SWARM-native | 10/10 |
+| Observability | 4/10 | MAF/LangGraph ecosystems | 9.5/10 |
+| Distributed execution | 3/10 | Durable worker runtime principles | 9.5/10 |
+| Governance | 9/10 | SWARM-native | 10/10 |
+
+These scores are internal assessment targets, not vendor claims.
+
+---
+
+# 42. CURRENT PROGRAM STATUS
 
 | Workstream | Status |
 |---|---|
+| Benchmark matrix | COMPLETE |
 | Memory source audit | COMPLETE |
 | Memory dependency audit | COMPLETE |
-| Letta benchmark | COMPLETE — principles extracted |
-| LangGraph benchmark | COMPLETE — principles extracted |
-| Memory V2 architecture | COMPLETE — design baseline |
-| Memory implementation specification | NEXT |
-| Memory code migration | NOT STARTED |
-| Memory production integration | NOT STARTED |
-| Memory verification | BLOCKED until implementation |
+| Letta analysis | COMPLETE |
+| LangGraph memory analysis | COMPLETE |
+| Memory V2 architecture | COMPLETE |
+| Workflow source audit | COMPLETE |
+| Microsoft Agent Framework workflow analysis | COMPLETE |
+| LangGraph workflow analysis | COMPLETE |
+| Workflow V2 build blueprint | COMPLETE |
+| Memory implementation | DEFERRED |
+| Workflow implementation | DEFERRED |
+| Production integration | DEFERRED |
+| Verification | DEFERRED until implementation |
 
-## Verified evidence from the supplied repository snapshot
+---
 
-- `tests/unit/test_memory_engine.py`: **16 passed**.
-- Vault E2E collection: **blocked by missing `vault_client` module**.
-- Production references to `MemoryEngine`: none found in the supplied `swarm/` tree beyond its export/definition.
-- `ContextManager` is actively used by `ContextCompactor`, creating a second overlapping context/state subsystem.
-- `MemoryEngine` persistence/search methods are placeholders.
+# 43. NEXT SUBSYSTEM
 
-# 23. Next Action — Implementation Specification
+After Workflow Engine, the program proceeds using the same methodology to the next benchmark domain.
 
-The next engineering artifact remains inside this same file. Before changing code, define the exact surgical implementation plan for:
+Planned order after workflow:
 
-1. authoritative Memory/Context domain contracts;
-2. repository interfaces;
-3. durable backend choice;
-4. ID/version model;
-5. authorization/policy integration;
-6. tenant/department/agent scope model;
-7. trust/provenance schema;
-8. retrieval/indexing architecture;
-9. context assembly/token budgeting;
-10. checkpoint boundary;
-11. ContextManager migration/compatibility strategy;
-12. test migration and new adversarial tests;
-13. rollout/rollback;
-14. production integration path.
+```text
+Routing
+→ Durability / Distributed Execution
+→ Observability
+→ Safety
+→ Budget Governance
+→ Model Runtime
+→ Inter-Agent Communication
+→ HITL
+→ Enterprise Security
+→ Testing / Verification
+```
 
-Only then should `memory_engine.py` and its callers be modified.
+Each subsystem receives a Build Blueprint before implementation is allowed.
 
-# 24. Program Rule
+---
 
-> **Take the best principle. Understand the trade-off. Adapt it to SWARM. Improve the weaknesses. Prove the result.**
+# 44. Final Program Rule
 
-This document is the single source of truth for the SWARM Competitive Architecture Program.
+> **Take the best principle. Understand the trade-off. Adapt it to SWARM. Improve the weaknesses. Build only after the blueprint is complete. Prove the result after implementation.**
+
+This document remains the single source of truth for the SWARM Competitive Architecture Program.
