@@ -1,30 +1,32 @@
 """
-SwarmMaster — منسق الـ 50-Agent Swarm بالكامل.
+SwarmMaster v2 — Thin orchestrator using decomposed components.
 
-التدفق (5 مراحل):
-1. Safety Dept check (PII, violence, jailbreak) - VETO-first
-2. Board deliberation (ethics_advisor VETO, strategy/risk/user votes)
-3. C-Suite decision (CFO budget, CLO legal VETO)
-4. Route to relevant Department (code/design/video/research/data/language/knowledge)
-5. Execute via the department's orchestrator
-
-هذا يحل المشاكل الحرجة:
-- ✅ لا تكامل بين الأقسام → SwarmMaster ينسقها
-- ✅ Safety Dept معزول → يُستدعى أولاً
-- ✅ لا end-to-end workflow → process() يعمل الكل
+F-008: SwarmMaster God Object fix.
+F-009: Weak Dependency Injection fix.
+Uses: RequestValidator, SafetyGate, BoardCoordinator, ExecutiveCoordinator,
+      ExecutionCoordinator, CostController, ResultAssembler, AuditEmitter,
+      RoutingEngine, PolicyEngine, ControlPlane
 """
 import logging
 import threading
 from dataclasses import dataclass, field
 from enum import Enum
 from typing import Any, Dict, List, Optional
+from datetime import datetime, timezone
 
-from swarm.enterprise.core.fallback_chain import FallbackChainExecutor
-from swarm.enterprise.core.model_registry_v2 import EnterpriseModelRegistry
-from swarm.enterprise.core.safety_filter import InlineSafetyFilter
-from swarm.enterprise.core.cache_manager import get_default_cache
-from swarm.enterprise.core.circuit_breaker import get_circuit_breaker
-from swarm.resilience.rate_limiter_v2 import get_rate_limiter
+from swarm.enterprise.core.auth import AuthorizationContext, AuthorizationPolicy
+from swarm.enterprise.core.budget.cost_estimation import CostEstimationService, get_cost_estimation_service
+from swarm.enterprise.core.budget.ledger import BudgetLedger, get_budget_ledger
+from swarm.enterprise.core.routing.engine import RoutingEngine, get_routing_engine
+from swarm.enterprise.core.policy.engine import PolicyEngine, get_policy_engine
+from swarm.enterprise.core.plane.control_plane import ControlPlane, get_control_plane, AdmissionRequest
+from swarm.enterprise.core.plane.execution_plane import ExecutionPlane, get_execution_plane, SwarmProcessExecutor
+from swarm.enterprise.core.orchestration.components import (
+    RequestValidator, SafetyGate, BoardCoordinator, ExecutiveCoordinator,
+    ExecutionCoordinator, CostController, ResultAssembler, AuditEmitter, SwarmStageResult,
+)
+from swarm.enterprise.core.execution.context import ExecutionContext, ExecutionIdentity
+from swarm.enterprise.core.auth import AuthorizationContext
 
 # Tier 1: Board
 from swarm.enterprise.board import create_board, BoardDecision
@@ -46,7 +48,7 @@ logger = logging.getLogger(__name__)
 
 
 class DeptType(str, Enum):
-    """أنواع الأقسام للتوجيه."""
+    """Department types for routing."""
     CODE = "code"
     DESIGN = "design"
     VIDEO = "video"
@@ -55,10 +57,10 @@ class DeptType(str, Enum):
     LANGUAGE = "language"
     KNOWLEDGE = "knowledge"
     SAFETY = "safety"
-    GENERAL = "general"  # لا يحتاج dept متخصص
+    GENERAL = "general"
 
 
-# كلمات مفتاحية لتوجيه الطلبات للأقسام المناسبة
+# Keywords for routing requests to appropriate departments
 DEPT_ROUTING_KEYWORDS = {
     DeptType.CODE: [
         "code", "function", "class", "implement", "build app",
@@ -98,341 +100,355 @@ DEPT_ROUTING_KEYWORDS = {
 
 @dataclass
 class SwarmRequest:
-    """طلب موحد للـ SwarmMaster."""
+    """Request to SwarmMaster (hardened - no client-controlled security/cost)."""
     question: str
-    type: str = "general"  # code, design, video, research, data, language, knowledge, general
-    estimated_cost: float = 0.0  # للـ CFO budget check
+    type: str = "general"
     context: Dict[str, Any] = field(default_factory=dict)
     require_human_review: bool = False
-    bypass_safety: bool = False  # للاختبار فقط
+    idempotency_key: Optional[str] = None
+    tenant_id: str = "default"
+    principal_id: str = "user"
 
 
 @dataclass
 class SwarmResult:
-    """نتيجة موحدة من SwarmMaster."""
+    """Result from SwarmMaster."""
     request_id: str
-    verdict: str  # "approved" | "rejected" | "vetoed" | "error"
-    final_decision: str  # "approved" | "vetoed" | "rejected" | "escalated"
+    execution_id: str
+    trace_id: str
+    policy_decision: str  # "approved" | "rejected" | "vetoed" | "escalated"
+    execution_state: str  # "pending" | "queued" | "running" | "succeeded" | "failed"
+    final_outcome: Optional[str] = None  # "success" | "failure" | null
     stages: Dict[str, Any] = field(default_factory=dict)
     output: Optional[Any] = None
     vetoed_by: Optional[str] = None
     veto_reason: Optional[str] = None
     executed_by: Optional[str] = None
+    cost_estimate: Optional[Dict[str, Any]] = None
+    actual_cost: Optional[Dict[str, Any]] = None
     metadata: Dict[str, Any] = field(default_factory=dict)
+
+    # Backward compatibility
+    @property
+    def verdict(self) -> str:
+        return self.policy_decision
+
+    @property
+    def final_decision(self) -> str:
+        return self.policy_decision
 
 
 class SwarmMaster:
-    """المنسق الرئيسي لـ 50-Agent Swarm.
-
-    يدير:
-    - Tier 1: Board (5 agents) - VETO على ethics
-    - Tier 2: C-Suite (7 agents) - VETO على legal, budget tracking
-    - Tier 3+4: 8 Departments (40 agents) - التنفيذ الفعلي
-    - Safety Dept (4 agents) - PII/violence/jailbreak check
-    """
+    """Thin orchestrator for 50-Agent Swarm (Enterprise Hardened v2)."""
 
     def __init__(
         self,
         cfo_budget_limit: float = float("inf"),
+        tenant_id: str = "default",
+        # Dependency injection for testability
+        validator: Any = None,
+        safety_gate: Any = None,
+        board_coordinator: Any = None,
+        executive_coordinator: Any = None,
+        execution_coordinator: Any = None,
+        cost_controller: Any = None,
+        result_assembler: Any = None,
+        audit_emitter: Any = None,
+        routing_engine: Any = None,
+        policy_engine: Any = None,
+        control_plane: Any = None,
+        execution_plane: Any = None,
+        auth_policy: Any = None,
+        cost_service: Any = None,
+        budget_ledger: Any = None,
+        board: Any = None,
+        csuite: Any = None,
+        depts: Dict[str, Any] = None,
     ):
-        # Core infrastructure (shared)
-        self.executor = FallbackChainExecutor()
-        self.safety = InlineSafetyFilter()
-        self.cache = get_default_cache()
-        self.rate_limiter = get_rate_limiter()
-        self.circuit_breaker = get_circuit_breaker()
+        # Injected dependencies (or defaults)
+        self.validator = validator or RequestValidator()
+        self.routing_engine = routing_engine or get_routing_engine()
+        self.policy_engine = policy_engine or get_policy_engine()
+        self.auth_policy = auth_policy or AuthorizationPolicy()
+        self.cost_service = cost_service or get_cost_estimation_service()
+        self.budget_ledger = budget_ledger or get_budget_ledger()
+        self.control_plane = control_plane or get_control_plane()
+        self.execution_plane = execution_plane or get_execution_plane()
+        self.audit_emitter = audit_emitter or AuditEmitter()
 
+        # Initialize core components if not injected
+        self._init_components(
+            board=board,
+            csuite=csuite,
+            depts=depts,
+            cfo_budget_limit=cfo_budget_limit,
+            tenant_id=tenant_id,
+        )
+
+        # Orchestration components (injected or created)
+        self.safety_gate = safety_gate or SafetyGate(self.safety_dept, self.policy_engine)
+        self.board_coordinator = board_coordinator or BoardCoordinator(self.board)
+        self.executive_coordinator = executive_coordinator or ExecutiveCoordinator(
+            self.csuite, self.cost_service, self.budget_ledger
+        )
+        self.execution_coordinator = execution_coordinator or ExecutionCoordinator(self.depts)
+        self.cost_controller = cost_controller or CostController(self.cost_service, self.budget_ledger)
+        self.result_assembler = result_assembler or ResultAssembler(result_factory=self._create_result)
+        self.validator = validator or RequestValidator()
+
+        self._lock = threading.Lock()
+
+    def _init_components(self, board, csuite, depts, cfo_budget_limit, tenant_id):
+        """Initialize core swarm components."""
         # Safety Dept (Tier 1 - VETO first)
         self.safety_dept = create_safety_dept()
 
         # Board (Tier 1 - strategic VETO)
-        self.board = create_board()
+        self.board = board or create_board()
 
         # C-Suite (Tier 2 - executive decision)
-        self.csuite = create_c_suite(cfo_budget_limit=cfo_budget_limit)
+        self.csuite = csuite or create_c_suite(cfo_budget_limit=cfo_budget_limit)
 
         # Departments (Tier 3+4 - execution)
-        self.depts = {
-            DeptType.CODE.value: create_code_dept(),
-            DeptType.DESIGN.value: create_design_dept(),
-            DeptType.VIDEO.value: create_video_dept(),
-            DeptType.RESEARCH.value: create_research_dept(),
-            DeptType.DATA.value: create_data_dept(),
-            DeptType.LANGUAGE.value: create_language_dept(),
-            DeptType.KNOWLEDGE.value: create_knowledge_dept(),
-            DeptType.SAFETY.value: self.safety_dept,
+        self.depts = depts or {
+            "code": create_code_dept(),
+            "design": create_design_dept(),
+            "video": create_video_dept(),
+            "research": create_research_dept(),
+            "data": create_data_dept(),
+            "language": create_language_dept(),
+            "knowledge": create_knowledge_dept(),
+            "safety": self.safety_dept,
         }
 
-        self._request_counter = 0
-        self._lock = threading.Lock()
+        # Initialize budget account
+        self._init_budget_account(tenant_id, cfo_budget_limit)
 
-    def process(self, request: SwarmRequest) -> SwarmResult:
-        """معالجة طلب كامل عبر كل الـ tiers.
+        # Register executor with execution plane
+        self.execution_plane.register_executor(
+            "swarm_process",
+            SwarmProcessExecutor(self),
+        )
 
-        التدفق:
-        1. Safety Dept (PII/violence/jailbreak check)
-        2. Board deliberation (ethics VETO + advisor votes)
-        3. C-Suite meeting (CFO budget + CLO legal VETO)
-        4. Route to Department
-        5. Execute and return
-        """
-        with self._lock:
-            self._request_counter += 1
-            req_id = f"req-{self._request_counter:06d}"
-
-        stages: Dict[str, Any] = {}
-        metadata = {"request_id": req_id, "timestamp": self._now_iso()}
-
-        # 1. Safety Dept (PII/violence/jailbreak block)
-        if not request.bypass_safety:
-            safety_result = self._safety_check(request)
-            stages["safety"] = safety_result
-            if safety_result.get("verdict") in ("unsafe", "critical"):
-                # M13: Include all stages even on safety veto
-                stages["board"] = {"verdict": "skipped", "reason": "safety_veto"}
-                stages["csuite"] = {"verdict": "skipped", "reason": "safety_veto"}
-                stages["routing"] = {"department": "none"}
-                stages["execution"] = {"department": "none", "success": False}
-                return SwarmResult(
-                    request_id=req_id,
-                    verdict="vetoed",
-                    final_decision="vetoed",
-                    stages=stages,
-                    vetoed_by="safety_dept",
-                    veto_reason=safety_result.get("explanation", "Content safety violation"),
-                    metadata=metadata,
-                )
-        else:
-            stages["safety"] = {"verdict": "bypassed", "reason": "bypass_safety=True"}
-
-        # 2. Board deliberation (strategic VETO)
-        board_result = self._board_deliberate(request)
-        stages["board"] = {
-            "verdict": board_result.final_decision,
-            "vetoed_by": board_result.vetoed_by,
-            "votes": board_result.votes,
-        }
-        if board_result.vetoed_by:
-            stages["csuite"] = {"verdict": "skipped", "reason": "board_veto"}
-            stages["routing"] = {"department": "none"}
-            stages["execution"] = {"department": "none", "success": False}
-            return SwarmResult(
-                request_id=req_id,
-                verdict="vetoed",
-                final_decision="vetoed",
-                stages=stages,
-                vetoed_by=board_result.vetoed_by,
-                veto_reason=board_result.veto_reason,
-                metadata=metadata,
-            )
-
-        # 3. C-Suite meeting (executive decision)
-        csuite_result = self._csuite_decide(request, board_result)
-        stages["csuite"] = {
-            "verdict": csuite_result.get("verdict"),
-            "vetoed_by": csuite_result.get("vetoed_by"),
-            "votes": csuite_result.get("votes"),
-        }
-        # Check both vetoed (hard block) and rejected (CFO budget breach)
-        if csuite_result.get("verdict") == "vetoed":
-            stages["routing"] = {"department": "none"}
-            stages["execution"] = {"department": "none", "success": False}
-            return SwarmResult(
-                request_id=req_id,
-                verdict="vetoed",
-                final_decision="vetoed",
-                stages=stages,
-                vetoed_by=csuite_result.get("vetoed_by"),
-                veto_reason=csuite_result.get("reason"),
-                metadata=metadata,
-            )
-        if csuite_result.get("verdict") == "rejected":
-            stages["routing"] = {"department": "none"}
-            stages["execution"] = {"department": "none", "success": False}
-            return SwarmResult(
-                request_id=req_id,
-                verdict="rejected",
-                final_decision="rejected",
-                stages=stages,
-                vetoed_by=csuite_result.get("vetoed_by"),
-                veto_reason=csuite_result.get("reason"),
-                metadata=metadata,
-            )
-
-        # 4. Route to Department
-        dept_name = self._route_to_dept(request)
-        stages["routing"] = {"department": dept_name.value}
-
-        # 5. Execute
+    def _init_budget_account(self, tenant_id: str, limit: float):
+        """Initialize budget account for tenant."""
+        from swarm.enterprise.core.budget.ledger import BudgetType
+        from decimal import Decimal
+        account_id = f"budget-{tenant_id}"
         try:
-            output = self._execute_in_dept(dept_name, request)
-            stages["execution"] = {
-                "department": dept_name.value,
-                "output_type": type(output).__name__,
-                "success": True,
-            }
-            return SwarmResult(
-                request_id=req_id,
-                verdict="approved",
-                final_decision="approved",
-                stages=stages,
-                output=output,
-                executed_by=dept_name.value,
-                metadata=metadata,
+            self.budget_ledger.create_account(
+                account_id=account_id,
+                tenant_id=tenant_id,
+                budget_type=BudgetType.DAILY,
+                limit=Decimal(str(limit)) if limit != float("inf") else Decimal("1000000"),
             )
-        except (RuntimeError, ValueError, KeyError, AttributeError) as e:
-            logger.exception("Execution in %s failed", dept_name)
-            stages["execution"] = {
-                "department": dept_name.value,
-                "success": False,
-                "error": str(e),
-            }
-            return SwarmResult(
-                request_id=req_id,
-                verdict="error",
-                final_decision="error",
-                stages=stages,
-                vetoed_by=None,
-                veto_reason=f"Execution error: {str(e)[:200]}",
-                metadata=metadata,
-            )
+        except ValueError:
+            pass  # Account already exists
 
-    def _safety_check(self, request: SwarmRequest) -> Dict[str, Any]:
-        """يفحص PII/violence/jailbreak."""
-        text = request.question + " " + str(request.context)
-        # Pass bypass_safety to department for internal fail-closed control
-        bypass = request.context.get("bypass_safety", False) if request.context else False
-        report = self.safety_dept.full_check(text, use_llm=not bypass)
-        return {
-            "verdict": report.verdict.value,
-            "flags": report.flags,
-            "explanation": report.explanation,
-            "analyst_votes": {k: v.value for k, v in report.analyst_votes.items()},
-        }
+    def _create_result(self, **kwargs) -> "SwarmResult":
+        """Factory method for creating SwarmResult objects."""
+        return SwarmResult(**kwargs)
 
-    def _board_deliberate(self, request: SwarmRequest) -> BoardDecision:
-        """يدعو المجلس للتصويت."""
-        context_str = str(request.context) if request.context else ""
-        bypass = request.bypass_safety
-        return self.board.deliberate(request.question, context=context_str, bypass_safety=bypass)
+    def process(
+        self,
+        request: SwarmRequest,
+        authorization_context: Optional[AuthorizationContext] = None,
+    ) -> SwarmResult:
+        """Process request through all stages (thin orchestration)."""
 
-    def _csuite_decide(self, request: SwarmRequest, board_result: BoardDecision) -> Dict[str, Any]:
-        """يدعو C-Suite للقرار التنفيذي."""
-        proposal = {
-            "title": request.question[:100],
-            "description": request.question,
-            "type": request.type,
-            "estimated_cost": request.estimated_cost,
-            "bypass_safety": request.context.get("bypass_safety", False) if request.context else False,
-        }
-        return self.csuite.executive_meeting(proposal)
+        # 1. Validate request
+        valid, error = self.validator.validate(request)
+        if not valid:
+            return self._error_result(request, error)
 
-    def _route_to_dept(self, request: SwarmRequest) -> DeptType:
-        """يوجّه الطلب للقسم المناسب."""
-        # 1. إذا حدد المستخدم النوع
-        if request.type and request.type != "general":
-            try:
-                return DeptType(request.type)
-            except ValueError:
-                pass
+        # 2. Create execution context
+        exec_context = ExecutionContext.create(
+            tenant_id=request.tenant_id,
+            principal_id=request.principal_id,
+            authorization_context=authorization_context,
+        )
+        from swarm.enterprise.core.execution.context import set_current_context, clear_current_context
+        set_current_context(exec_context)
 
-        # 2. Auto-detect من الكلمات المفتاحية (with word boundaries for precision)
-        import re
-        text_lower = request.question.lower()
-        scores: Dict[DeptType, int] = {dt: 0 for dt in DeptType}
-        for dept, keywords in DEPT_ROUTING_KEYWORDS.items():
-            for kw in keywords:
-                # Use word boundary matching to avoid false positives like "code" in "encode"
-                pattern = r'(?:^|\W)' + re.escape(kw) + r'(?:\W|$)'
-                if re.search(pattern, text_lower):
-                    scores[dept] += 1
-
-        # أعلى score
-        best = max(scores.items(), key=lambda x: x[1])
-        if best[1] > 0:
-            return best[0]
-
-        return DeptType.GENERAL
-
-    def _execute_in_dept(self, dept: DeptType, request: SwarmRequest) -> Any:
-        """ينفذ في القسم المحدد."""
-        if dept == DeptType.GENERAL:
-            # لا يوجد dept متخصص، يُرجع Board decision كـ output
-            return {
-                "type": "general",
-                "message": "No specific department matched. Board approved but no execution.",
-                "board_verdict": "approved",
-            }
-
-        # استدعاء الـ orchestrator المناسب
-        orch = self.depts.get(dept.value)
-        if not orch:
-            return {"error": f"no orchestrator for {dept.value}"}
-
-        # تنفيذ مناسب حسب القسم
-        if dept == DeptType.CODE:
-            # Code: write code + review
-            artifact = orch.coder_1.write_code(request.question, "python")
-            # C3: Better error detection - check artifact.success or review result
-            has_error = not artifact.code or artifact.code.strip().startswith("# Error:")
-            if not has_error:
-                review = orch.reviewer.full_review(artifact.code, artifact.language)
-                return {
-                    "code": artifact.code,
-                    "review": {
-                        "approved": review.approved,
-                        "score": review.total_score,
-                        "findings_count": len(review.findings),
-                    },
-                }
-            return {"code": artifact.code}
-
-        elif dept == DeptType.DESIGN:
-            # Design: brand kit
-            return orch.generate_complete_brand_kit(
-                brand_name=request.context.get("brand_name", "Project")
+        # 3. Create authorization context if not provided
+        if authorization_context is None:
+            from swarm.enterprise.core.auth import Principal
+            principal = Principal.user(request.principal_id, request.tenant_id)
+            authorization_context = AuthorizationContext.for_user(
+                user_id=request.principal_id,
+                tenant_id=request.tenant_id,
             )
 
-        elif dept == DeptType.VIDEO:
-            # Video: promo video
-            return orch.create_promo_video(
-                brief={"title": request.question[:50], "description": request.question}
+        # 4. Compute cost estimate
+        cost_estimate = self.cost_controller.estimate_cost(request, request.tenant_id)
+
+        # 5. Run stages
+        stages: Dict[str, SwarmStageResult] = {}
+        final_output = None
+        policy_decision = "approved"
+        execution_state = "pending"
+        final_outcome = None
+        executed_by = None
+        vetoed_by = None
+        veto_reason = None
+
+        try:
+            # Stage 1: Safety
+            safety_result = self.safety_gate.check(request, exec_context, authorization_context)
+            stages["safety"] = safety_result
+            if not safety_result.success:
+                policy_decision = "vetoed"
+                execution_state = "failed"
+                final_outcome = "failure"
+                vetoed_by = "safety_dept"
+                veto_reason = safety_result.error
+                return self._build_result(exec_context, stages, policy_decision, execution_state, final_outcome, vetoed_by, veto_reason, cost_estimate)
+
+            # Stage 2: Board
+            board_result = self.board_coordinator.deliberate(request, exec_context, authorization_context)
+            stages["board"] = board_result
+            if not board_result.success:
+                policy_decision = "vetoed"
+                execution_state = "failed"
+                final_outcome = "failure"
+                vetoed_by = board_result.output.get("vetoed_by", "board")
+                veto_reason = board_result.error
+                return self._build_result(exec_context, stages, policy_decision, execution_state, final_outcome, vetoed_by, veto_reason, cost_estimate)
+
+            # Stage 3: C-Suite
+            exec_result = self.executive_coordinator.decide(request, None, exec_context, authorization_context)
+            stages["csuite"] = exec_result
+            if not exec_result.success:
+                policy_decision = "vetoed" if exec_result.output.get("verdict") == "vetoed" else "rejected"
+                execution_state = "failed"
+                final_outcome = "failure"
+                vetoed_by = exec_result.output.get("vetoed_by", "csuite")
+                veto_reason = exec_result.error
+                return self._build_result(exec_context, stages, policy_decision, execution_state, final_outcome, vetoed_by, veto_reason, cost_estimate)
+
+            # Stage 4: Routing
+            routing_decision = self.routing_engine.route(
+                question=request.question,
+                explicit_type=request.type if request.type != "general" else None,
+                context=request.context,
+            )
+            stages["routing"] = SwarmStageResult(
+                stage_name="routing",
+                success=True,
+                output=routing_decision.to_dict(),
             )
 
-        elif dept == DeptType.RESEARCH:
-            # Research: full pipeline
-            return orch.full_research(request.question)
+            # Stage 5: Execution
+            exec_stage = self.execution_coordinator.execute(request, routing_decision, exec_context, authorization_context)
+            stages["execution"] = exec_stage
+            if not exec_stage.success:
+                policy_decision = "error"
+                execution_state = "failed"
+                final_outcome = "failure"
+                veto_reason = exec_stage.error
+            else:
+                execution_state = "succeeded"
+                final_outcome = "success"
+                executed_by = exec_stage.output.get("department")
+                final_output = exec_stage.output
 
-        elif dept == DeptType.DATA:
-            # Data: analyze question
-            return orch.analyze_question(request.question)
+            policy_decision = "approved" if final_outcome == "success" else policy_decision
 
-        elif dept == DeptType.LANGUAGE:
-            # Language: translate + localize
-            ctx = request.context or {}
-            return orch.translate_and_localize(
-                text=request.question,
-                source_lang=ctx.get("source_lang", "en"),
-                target_lang=ctx.get("target_lang", "ar"),
-            )
+        except Exception as e:
+            logger.exception("SwarmMaster processing error")
+            policy_decision = "error"
+            execution_state = "failed"
+            final_outcome = "failure"
+            veto_reason = f"Orchestration error: {e}"
 
-        elif dept == DeptType.KNOWLEDGE:
-            # Knowledge: add doc + query
-            return orch.query(request.question, top_k=3, rerank=True)
+        return self._build_result(
+            exec_context, stages, policy_decision, execution_state, final_outcome,
+            vetoed_by, veto_reason, cost_estimate, final_output, executed_by
+        )
 
-        elif dept == DeptType.SAFETY:
-            # Safety: full check
-            report = orch.full_check(request.question, use_llm=False)
-            return {
-                "verdict": report.verdict.value,
-                "flags": report.flags,
-                "explanation": report.explanation,
-            }
+    def _build_result(
+        self,
+        exec_context: ExecutionContext,
+        stages: Dict[str, SwarmStageResult],
+        policy_decision: str,
+        execution_state: str,
+        final_outcome: Optional[str],
+        vetoed_by: Optional[str] = None,
+        veto_reason: Optional[str] = None,
+        cost_estimate: Optional[Dict] = None,
+        output: Optional[Any] = None,
+        executed_by: Optional[str] = None,
+    ) -> SwarmResult:
+        """Build final result using ResultAssembler."""
+        # Emit audit events
+        for stage_name, stage_result in stages.items():
+            if not stage_result.success:
+                self.audit_emitter.emit(
+                    event_type="stage_failed",
+                    actor="swarm_master",
+                    request_id=exec_context.identity.request_id,
+                    execution_id=exec_context.identity.execution_id,
+                    trace_id=exec_context.identity.trace_id,
+                    decision=stage_result.error or "failed",
+                    details={"stage": stage_name, "error": stage_result.error},
+                )
 
-        return {"error": f"unknown dept: {dept.value}"}
+        # Emit final decision
+        self.audit_emitter.emit(
+            event_type="final_decision",
+            actor="swarm_master",
+            request_id=exec_context.identity.request_id,
+            execution_id=exec_context.identity.execution_id,
+            trace_id=exec_context.identity.trace_id,
+            decision=policy_decision,
+            details={
+                "execution_state": execution_state,
+                "final_outcome": final_outcome,
+                "executed_by": executed_by,
+                "vetoed_by": vetoed_by,
+            },
+        )
+
+        return self.result_assembler.assemble(
+            request_id=exec_context.identity.request_id,
+            execution_id=exec_context.identity.execution_id,
+            trace_id=exec_context.identity.trace_id,
+            stages=stages,
+            final_output=output,
+            policy_decision=policy_decision,
+            execution_state=execution_state,
+            final_outcome=final_outcome,
+            executed_by=executed_by,
+            vetoed_by=vetoed_by,
+            veto_reason=veto_reason,
+            cost_estimate=cost_estimate,
+            metadata={
+                "tenant_id": exec_context.tenant_id,
+                "principal_id": exec_context.principal_id,
+            },
+        )
+
+    def _error_result(self, request: SwarmRequest, error: str) -> SwarmResult:
+        """Build error result."""
+        exec_context = ExecutionContext.create(
+            tenant_id=request.tenant_id,
+            principal_id=request.principal_id,
+        )
+        return self.result_assembler.assemble(
+            request_id=exec_context.identity.request_id,
+            execution_id=exec_context.identity.execution_id,
+            trace_id=exec_context.identity.trace_id,
+            stages={},
+            final_output=None,
+            policy_decision="error",
+            execution_state="failed",
+            final_outcome="failure",
+            veto_reason=error,
+            metadata={"tenant_id": request.tenant_id, "principal_id": request.principal_id},
+        )
 
     def get_status(self) -> Dict[str, Any]:
-        """حالة الـ Swarm."""
+        """Swarm status."""
         return {
             "board_agents": 5,
             "csuite_agents": 7,
@@ -440,14 +456,15 @@ class SwarmMaster:
                 len(getattr(d, "_agents", {})) for d in self.depts.values()
                 if hasattr(d, "_agents")
             ),
-            "total_chains": len(EnterpriseModelRegistry.ALL_CHAINS),
-            "rate_limit_status": "active",
-            "circuit_breaker_status": "active",
-            "cache_status": "active" if self.cache else "inactive",
+            "control_plane": "active",
+            "execution_plane": "active",
+            "routing_engine": "active",
+            "policy_engine": "active",
+            "audit_emitter": "active",
         }
 
     def list_agents(self) -> Dict[str, List[str]]:
-        """يرجع قائمة بكل الـ agents حسب القسم."""
+        """List all agents by department."""
         return {
             "board": ["chairman", "strategy_advisor", "ethics_advisor", "risk_advisor", "user_advisor"],
             "csuite": ["ceo", "cto", "cfo", "coo", "cmo", "chro", "clo"],
@@ -461,18 +478,13 @@ class SwarmMaster:
             "safety": ["director", "content", "topic", "jailbreak"],
         }
 
-    @staticmethod
-    def _now_iso() -> str:
-        from datetime import datetime, timezone
-        return datetime.now(timezone.utc).isoformat()
 
-
-# Singleton
+# Backward compatibility singleton
 _master_instance: Optional[SwarmMaster] = None
 
 
 def get_master() -> SwarmMaster:
-    """يرجع الـ SwarmMaster singleton."""
+    """Get SwarmMaster singleton."""
     global _master_instance
     if _master_instance is None:
         _master_instance = SwarmMaster()

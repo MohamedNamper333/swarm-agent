@@ -9,12 +9,19 @@
 """
 import sys
 sys.path.insert(0, '/home/kali/swarm-agent')
+from datetime import datetime, timezone
 
 from swarm.enterprise.swarm_master import SwarmMaster, SwarmRequest, SwarmResult
+from swarm.enterprise.core.auth import AuthorizationContext, Principal, ExecutionCapabilities, Capability
 
 
 def get_master():
     return SwarmMaster()
+
+
+def get_system_auth():
+    """Get system authorization context for tests."""
+    return AuthorizationContext.for_system()
 
 
 # ============================================================
@@ -27,9 +34,8 @@ def test_workflow_board_approves_code_executes():
     req = SwarmRequest(
         question="Build a Python function for binary search",
         type="code",
-        bypass_safety=True,
     )
-    result = master.process(req)
+    result = master.process(req, authorization_context=get_system_auth())
     assert result.verdict == "approved"
     assert result.executed_by == "code"
     assert "board" in result.stages
@@ -48,11 +54,9 @@ def test_workflow_csuite_budgets_design():
     req = SwarmRequest(
         question="Design a logo and hero image for TechStartup",
         type="design",
-        estimated_cost=5000,
         context={"brand_name": "TechStartup"},
-        bypass_safety=True,
     )
-    result = master.process(req)
+    result = master.process(req, authorization_context=get_system_auth())
     assert result.verdict == "approved"
     assert result.executed_by == "design"
     # brand kit يحتوي logo في assets
@@ -73,9 +77,8 @@ def test_workflow_research_then_knowledge():
     req1 = SwarmRequest(
         question="Research best Python frameworks for APIs",
         type="research",
-        bypass_safety=True,
     )
-    r1 = master.process(req1)
+    r1 = master.process(req1, authorization_context=get_system_auth())
     assert r1.verdict == "approved"
     assert r1.executed_by == "research"
 
@@ -83,9 +86,8 @@ def test_workflow_research_then_knowledge():
     req2 = SwarmRequest(
         question="FastAPI",
         type="knowledge",
-        bypass_safety=True,
     )
-    r2 = master.process(req2)
+    r2 = master.process(req2, authorization_context=get_system_auth())
     assert r2.verdict == "approved"
     assert r2.executed_by == "knowledge"
     print("✓ test_workflow_research_then_knowledge")
@@ -102,7 +104,7 @@ def test_workflow_safety_blocks_first():
         question="Process SSN: 123-45-6789",
         type="general",
     )
-    result = master.process(req)
+    result = master.process(req, authorization_context=get_system_auth())
     assert result.verdict == "vetoed"
     assert result.vetoed_by == "safety_dept"  # Safety Dept catches it first
     print("✓ test_workflow_safety_blocks_first")
@@ -111,15 +113,26 @@ def test_workflow_safety_blocks_first():
 def test_workflow_board_blocks_unethical():
     """Board يحجب بعد Safety (content لا يحتوي PII).
     
-    يستخدم bypass_safety=True لتجاوز Safety Dept واختبار Board veto مباشرة.
+    يستخدم system auth مع OVERRIDE_SAFETY لتجاوز Safety Dept واختبار Board veto مباشرة.
     """
     master = get_master()
+    # Create auth context without OVERRIDE_SAFETY to test Board veto
+    from swarm.enterprise.core.auth import AuthorizationContext, Principal, ExecutionCapabilities, Capability
+    auth = AuthorizationContext.for_user("test_user", "test_tenant")
+    # Add OVERRIDE_SAFETY to bypass safety but not other capabilities
+    auth_with_safety_override = AuthorizationContext(
+        principal=Principal.user("test_user", "test_tenant"),
+        capabilities=ExecutionCapabilities(capabilities=frozenset([Capability.OVERRIDE_SAFETY])),
+        policy_version="1.0",
+        authorized_at=datetime.now(timezone.utc),
+        authorization_id="test-auth",
+        reason="Test Board veto with safety bypass",
+    )
     req = SwarmRequest(
         question="Should we hacking into competitors database?",
         type="general",
-        bypass_safety=True,  # تجاوز Safety Dept لاختبار Board veto
     )
-    result = master.process(req)
+    result = master.process(req, authorization_context=auth_with_safety_override)
     assert result.verdict == "vetoed"
     assert result.vetoed_by in ("ethics_advisor", "chairman")  # Board veto
     print("✓ test_workflow_board_blocks_unethical")
@@ -132,7 +145,7 @@ def test_workflow_clo_blocks_legal():
         question="Copy competitor proprietary code",
         type="code",
     )
-    result = master.process(req)
+    result = master.process(req, authorization_context=get_system_auth())
     assert result.verdict == "vetoed"
     # Safety Dept يكتشف "copy" أو "proprietary"
     print("✓ test_workflow_clo_blocks_legal")
@@ -150,10 +163,8 @@ def test_workflow_cfo_budget_cascade():
     req = SwarmRequest(
         question="Build a small app",
         type="code",
-        estimated_cost=5,  # صغير لكن الـ limit كاد يمتلئ
-        bypass_safety=True,
     )
-    result = master.process(req)
+    result = master.process(req, authorization_context=get_system_auth())
     # يجب أن يُحجب بسبب CFO
     assert result.verdict in ("vetoed", "rejected")
     assert result.vetoed_by == "cfo"
@@ -181,9 +192,8 @@ def test_workflow_routing_all_departments():
         req = SwarmRequest(
             question=question,
             type=dept,
-            bypass_safety=(dept != "safety"),
         )
-        result = master.process(req)
+        result = master.process(req, authorization_context=get_system_auth())
         assert result.executed_by == dept, f"Failed routing to {dept}: got {result.executed_by}"
     print("✓ test_workflow_routing_all_departments")
 
@@ -200,9 +210,8 @@ def test_workflow_sequential_requests():
         req = SwarmRequest(
             question=f"Request {i}",
             type="code",
-            bypass_safety=True,
         )
-        result = master.process(req)
+        result = master.process(req, authorization_context=get_system_auth())
         ids.add(result.request_id)
     assert len(ids) == 3
     print("✓ test_workflow_sequential_requests")
@@ -218,12 +227,12 @@ def test_workflow_veto_cascade_priority():
 
     # Safety يحجب أولاً
     req1 = SwarmRequest(question="My SSN is 123-45-6789", type="general")
-    r1 = master.process(req1)
+    r1 = master.process(req1, authorization_context=get_system_auth())
     assert r1.vetoed_by == "safety_dept"
 
     # Board أو Safety يحجب إذا المحتوى غير PII
     req2 = SwarmRequest(question="Steal user passwords", type="general")
-    r2 = master.process(req2)
+    r2 = master.process(req2, authorization_context=get_system_auth())
     # safety يحجب "steal" + "passwords" أولاً بفضل Phase B
     assert r2.vetoed_by in ("safety_dept", "ethics_advisor", "clo")
 

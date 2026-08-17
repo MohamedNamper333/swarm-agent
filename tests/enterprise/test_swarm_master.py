@@ -15,6 +15,12 @@ from swarm.enterprise.swarm_master import (
     SwarmMaster, SwarmRequest, SwarmResult, DeptType,
     DEPT_ROUTING_KEYWORDS, get_master,
 )
+from swarm.enterprise.core.auth import AuthorizationContext
+
+
+def get_system_auth():
+    """Get system authorization context for tests."""
+    return AuthorizationContext.for_system()
 from swarm.enterprise.core.placeholder import (
     SmartPlaceholder, classify_model, ModelType, get_default_placeholder,
     smart_placeholder_call,
@@ -305,8 +311,8 @@ def test_master_process_cfo_budget_circuit_breaker():
     """CFO circuit breaker يعمل."""
     master = SwarmMaster(cfo_budget_limit=100)
     master.csuite.cfo.record_spend(85)  # 85% used
-    req = SwarmRequest(question="Expensive project", type="code", estimated_cost=10)
-    result = master.process(req)
+    req = SwarmRequest(question="Expensive project", type="code")
+    result = master.process(req, authorization_context=get_system_auth())
     # CFO budget violation → rejected (not vetoed, since it's a budget check)
     assert result.verdict == "rejected"
     assert result.vetoed_by == "cfo"
@@ -399,12 +405,11 @@ def test_uber_eats_full_flow():
     req = SwarmRequest(
         question="Build a food delivery app like Uber Eats",
         type="code",
-        estimated_cost=50000,
         context={
             "features": ["restaurant listings", "order tracking", "payment"],
         },
     )
-    result = master.process(req)
+    result = master.process(req, authorization_context=get_system_auth())
 
     # التحقق من المراحل
     assert "safety" in result.stages

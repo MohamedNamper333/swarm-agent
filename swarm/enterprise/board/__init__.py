@@ -18,6 +18,7 @@ from dataclasses import dataclass, field
 from typing import Any, Dict, List, Optional
 
 from swarm.enterprise.core.fallback_chain import FallbackChainExecutor
+from swarm.enterprise.core.auth import AuthorizationContext, Capability
 from swarm.enterprise.core.model_registry_v2 import EnterpriseModelRegistry, FallbackChain
 from swarm.enterprise.core.safety_filter import InlineSafetyFilter, SafetyViolation
 from swarm.enterprise.core.cache_manager import get_default_cache
@@ -298,25 +299,39 @@ class BoardOrchestrator:
             "user_advisor": self.user,
         }
 
-    def deliberate(self, question: str, context: Dict[str, Any] = None, bypass_safety: bool = False) -> BoardDecision:
+    def deliberate(
+        self,
+        question: str,
+        context: Dict[str, Any] = None,
+        bypass_safety: bool = False,
+        authorization_context: Optional[AuthorizationContext] = None,
+    ) -> BoardDecision:
         """Run full board deliberation.
         
         Args:
             question: The question to deliberate on
             context: Optional context dictionary
             bypass_safety: If True, skip inline safety checks in agents.
-                           VETO check (ethics_advisor) always runs.
+                           VETO check (ethics_advisor) always runs unless OVERRIDE_SAFETY capability.
+            authorization_context: Authorization context with capabilities.
         """
-        # 1. Check VETO first (ethics_advisor) - ALWAYS runs
-        veto = self.ethics.check_veto(question, context)
-        if veto:
-            return BoardDecision(
-                question=question,
-                votes={},
-                vetoed_by=veto["vetoed_by"],
-                veto_reason=veto["reason"],
-                final_decision="vetoed",
-            )
+        # Check if OVERRIDE_SAFETY capability is granted
+        has_safety_override = (
+            authorization_context 
+            and authorization_context.capabilities.has(Capability.OVERRIDE_SAFETY)
+        )
+
+        # 1. Check VETO first (ethics_advisor) - runs unless OVERRIDE_SAFETY
+        if not has_safety_override:
+            veto = self.ethics.check_veto(question, context)
+            if veto:
+                return BoardDecision(
+                    question=question,
+                    votes={},
+                    vetoed_by=veto["vetoed_by"],
+                    veto_reason=veto["reason"],
+                    final_decision="vetoed",
+                )
 
         # 2. Get votes from 4 advisors (not chairman)
         votes = {}

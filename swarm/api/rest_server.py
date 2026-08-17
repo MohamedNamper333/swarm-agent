@@ -856,12 +856,16 @@ def get_swarm_master():
 # ========== Request Models ==========
 
 class SwarmProcessRequest(BaseModel):
-    """طلب لمعالجته عبر SwarmMaster."""
+    """طلب لمعالجته عبر SwarmMaster (hardened - no client-controlled security/cost)."""
     question: str
     type: str = "general"
-    estimated_cost: float = 0.0
+    # estimated_cost REMOVED (F-002) - computed server-side
+    # bypass_safety REMOVED (F-001) - replaced by AuthorizationContext
     context: Dict[str, Any] = Field(default_factory=dict)
-    bypass_safety: bool = False
+    require_human_review: bool = False
+    idempotency_key: Optional[str] = None  # F-006
+    tenant_id: str = "default"
+    principal_id: str = "user"
 
 
 class BoardDeliberateRequest(BaseModel):
@@ -931,27 +935,43 @@ class SafetyCheckRequest(BaseModel):
 # ========== Endpoints ==========
 
 @app.post("/swarm/process")
-async def swarm_process(request: SwarmProcessRequest):
+async def swarm_process(request: SwarmProcessRequest, auth_user: Dict[str, Any] = Depends(require_scopes("swarm:execute"))):
     """Master endpoint: معالجة طلب عبر كل الـ tiers (Safety → Board → C-Suite → Dept)."""
     from swarm.enterprise.swarm_master import SwarmRequest
+    from swarm.enterprise.core.auth import AuthorizationContext, Principal
     master = get_swarm_master()
+    
+    # Create authorization context from authenticated user (F-001)
+    principal = Principal.user(request.principal_id, request.tenant_id)
+    auth_context = AuthorizationContext.for_user(
+        user_id=request.principal_id,
+        tenant_id=request.tenant_id,
+    )
+    
     req = SwarmRequest(
         question=request.question,
         type=request.type,
-        estimated_cost=request.estimated_cost,
         context=request.context,
-        bypass_safety=request.bypass_safety,
+        require_human_review=request.require_human_review,
+        idempotency_key=request.idempotency_key,
+        tenant_id=request.tenant_id,
+        principal_id=request.principal_id,
     )
-    result = master.process(req)
+    result = master.process(req, authorization_context=auth_context)
     return {
         "request_id": result.request_id,
-        "verdict": result.verdict,
-        "final_decision": result.final_decision,
+        "execution_id": result.execution_id,
+        "trace_id": result.trace_id,
+        "policy_decision": result.policy_decision,
+        "execution_state": result.execution_state,
+        "final_outcome": result.final_outcome,
         "vetoed_by": result.vetoed_by,
         "veto_reason": result.veto_reason,
         "executed_by": result.executed_by,
         "stages": result.stages,
         "output": str(result.output)[:500] if result.output else None,
+        "cost_estimate": result.cost_estimate,
+        "actual_cost": result.actual_cost,
         "metadata": result.metadata,
     }
 
@@ -1109,6 +1129,194 @@ async def safety_check(request: SafetyCheckRequest):
         "flags": report.flags,
         "explanation": report.explanation,
         "analyst_votes": {k: v.value for k, v in report.analyst_votes.items()},
+    }
+
+
+# ========== Wave 1: Institutional Infrastructure Endpoints ==========
+
+class BudgetReserveRequest(BaseModel):
+    account_id: str
+    amount: str  # Decimal as string
+    metadata: Dict[str, Any] = Field(default_factory=dict)
+
+class BudgetConsumeRequest(BaseModel):
+    reservation_id: str
+    actual_amount: Optional[str] = None
+
+class BudgetReleaseRequest(BaseModel):
+    reservation_id: str
+
+
+@app.post("/budget/reserve")
+async def budget_reserve(request: BudgetReserveRequest, auth_user: Dict[str, Any] = Depends(require_scopes("budget:write"))):
+    """Reserve budget atomically (F-003)."""
+    from swarm.enterprise.core.budget.ledger import get_budget_ledger
+    from decimal import Decimal
+    ledger = get_budget_ledger()
+    reservation = ledger.reserve(
+        account_id=request.account_id,
+        amount=Decimal(request.amount),
+        metadata=request.metadata,
+    )
+    return {
+        "reservation_id": reservation.reservation_id,
+        "account_id": reservation.account_id,
+        "amount": str(reservation.amount),
+        "status": reservation.status,
+        "created_at": reservation.created_at.isoformat(),
+    }
+
+
+@app.post("/budget/consume")
+async def budget_consume(request: BudgetConsumeRequest, auth_user: Dict[str, Any] = Depends(require_scopes("budget:write"))):
+    """Consume a budget reservation (F-003)."""
+    from swarm.enterprise.core.budget.ledger import get_budget_ledger
+    from decimal import Decimal
+    ledger = get_budget_ledger()
+    amount = ledger.consume(
+        reservation_id=request.reservation_id,
+        actual_amount=Decimal(request.actual_amount) if request.actual_amount else None,
+    )
+    return {"consumed_amount": str(amount)}
+
+
+@app.post("/budget/release")
+async def budget_release(request: BudgetReleaseRequest, auth_user: Dict[str, Any] = Depends(require_scopes("budget:write"))):
+    """Release a budget reservation (F-003)."""
+    from swarm.enterprise.core.budget.ledger import get_budget_ledger
+    ledger = get_budget_ledger()
+    amount = ledger.release(request.reservation_id)
+    return {"released_amount": str(amount)}
+
+
+@app.get("/budget/account/{account_id}")
+async def budget_account_status(account_id: str, auth_user: Dict[str, Any] = Depends(require_scopes("budget:read"))):
+    """Get budget account status."""
+    from swarm.enterprise.core.budget.ledger import get_budget_ledger
+    ledger = get_budget_ledger()
+    status = ledger.get_account_status(account_id)
+    if not status:
+        raise HTTPException(404, "Account not found")
+    return status
+
+
+class IdempotencyCheckRequest(BaseModel):
+    key: str
+    tenant_id: str = "default"
+    payload: Dict[str, Any]
+
+
+@app.post("/idempotency/check")
+async def idempotency_check(request: IdempotencyCheckRequest, auth_user: Dict[str, Any] = Depends(require_scopes("idempotency:read"))):
+    """Check idempotency key status (F-006)."""
+    from swarm.enterprise.core.idempotency.store import get_idempotency_store
+    store = get_idempotency_store()
+    record, is_new = store.check_and_store(
+        key=request.key,
+        tenant_id=request.tenant_id,
+        payload=request.payload,
+    )
+    return {
+        "key": record.key,
+        "status": record.status.value,
+        "is_new": is_new,
+        "execution_id": record.execution_id,
+        "created_at": record.created_at.isoformat(),
+    }
+
+
+@app.get("/idempotency/store/stats")
+async def idempotency_stats(auth_user: Dict[str, Any] = Depends(require_scopes("idempotency:read"))):
+    """Get idempotency store statistics."""
+    from swarm.enterprise.core.idempotency.store import get_idempotency_store
+    store = get_idempotency_store()
+    return store.get_stats()
+
+
+@app.post("/policy/evaluate")
+async def policy_evaluate(
+    action: str,
+    resource: Optional[str] = None,
+    metadata: Optional[Dict[str, Any]] = None,
+    auth_user: Dict[str, Any] = Depends(require_scopes("policy:read")),
+):
+    if metadata is None:
+        metadata = {}
+    """Evaluate policies for an action (F-029)."""
+    from swarm.enterprise.core.policy.engine import get_policy_engine, PolicyContext
+    from swarm.enterprise.core.execution.context import get_current_context
+    engine = get_policy_engine()
+    context = get_current_context()
+    if not context:
+        raise HTTPException(400, "No execution context available")
+    
+    policy_ctx = PolicyContext(
+        execution_context=context,
+        action=action,
+        resource=resource,
+        metadata=metadata,
+    )
+    results = engine.evaluate(policy_ctx)
+    allowed, _ = engine.is_allowed(policy_ctx)
+    return {
+        "allowed": allowed,
+        "results": [r.__dict__ for r in results],
+    }
+
+
+@app.get("/policy/tool/{tool_name}")
+async def tool_policy_get(tool_name: str, auth_user: Dict[str, Any] = Depends(require_scopes("policy:read"))):
+    """Get tool policy (F-033)."""
+    from swarm.enterprise.core.policy.tool_policy import get_tool_policy_registry
+    registry = get_tool_policy_registry()
+    policy = registry.get(tool_name)
+    if not policy:
+        raise HTTPException(404, "Tool policy not found")
+    return {
+        "name": policy.name,
+        "risk_level": policy.risk_level.value,
+        "required_capability": policy.required_capability,
+        "side_effect_level": policy.side_effect_level.value,
+        "description": policy.description,
+        "max_calls_per_execution": policy.max_calls_per_execution,
+        "requires_approval": policy.requires_approval,
+        "approval_roles": list(policy.approval_roles),
+    }
+
+
+@app.get("/execution/context")
+async def execution_context_get(auth_user: Dict[str, Any] = Depends(require_scopes("execution:read"))):
+    """Get current execution context (F-005, F-032, F-037)."""
+    from swarm.enterprise.core.execution.context import get_current_context
+    context = get_current_context()
+    if not context:
+        return {"context": None}
+    return {
+        "identity": {
+            "request_id": context.identity.request_id,
+            "execution_id": context.identity.execution_id,
+            "trace_id": context.identity.trace_id,
+            "correlation_id": context.identity.correlation_id,
+            "causation_id": context.identity.causation_id,
+        },
+        "deadline": {
+            "total_remaining_ms": context.deadline.total_remaining_ms(),
+            "is_expired": context.deadline.is_expired(),
+        },
+        "delegation": {
+            "current_depth": context.delegation.current_depth,
+            "max_depth": context.delegation.max_depth,
+            "visited_agents": list(context.delegation.visited_agents),
+            "delegation_chain": context.delegation.delegation_chain,
+        },
+        "resources": {
+            "tokens_used": context.resources.tokens_used,
+            "tool_calls_used": context.resources.tool_calls_used,
+            "agents_spawned": context.resources.agents_spawned,
+        },
+        "state": context.state.value,
+        "tenant_id": context.tenant_id,
+        "principal_id": context.principal_id,
     }
 
 

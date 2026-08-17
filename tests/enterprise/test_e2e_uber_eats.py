@@ -14,6 +14,12 @@ import sys
 sys.path.insert(0, '/home/kali/swarm-agent')
 
 from swarm.enterprise.swarm_master import SwarmMaster, SwarmRequest, SwarmResult
+from swarm.enterprise.core.auth import AuthorizationContext
+
+
+def get_system_auth():
+    """Get system authorization context for tests."""
+    return AuthorizationContext.for_system()
 
 
 def test_e2e_uber_eats_full_pipeline():
@@ -24,7 +30,6 @@ def test_e2e_uber_eats_full_pipeline():
     req = SwarmRequest(
         question="Build a food delivery app like Uber Eats with restaurant listings and payment",
         type="code",
-        estimated_cost=75000,
         context={
             "features": [
                 "restaurant listings",
@@ -35,10 +40,9 @@ def test_e2e_uber_eats_full_pipeline():
             "target_users": "consumers and restaurants",
             "timeline": "6 months",
         },
-        bypass_safety=True,
     )
 
-    result = master.process(req)
+    result = master.process(req, authorization_context=get_system_auth())
 
     # === Stage 1: Safety Dept ===
     assert "safety" in result.stages
@@ -82,7 +86,7 @@ def test_e2e_uber_eats_with_safety_violation():
         type="code",
     )
 
-    result = master.process(req)
+    result = master.process(req, authorization_context=get_system_auth())
     # Safety Dept يكتشف credit card (Phase B)
     assert result.verdict == "vetoed"
     assert result.vetoed_by == "safety_dept"
@@ -101,7 +105,7 @@ def test_e2e_uber_eats_with_legal_violation():
         type="code",
     )
 
-    result = master.process(req)
+    result = master.process(req, authorization_context=get_system_auth())
     assert result.verdict == "vetoed"
     # Safety يحجب "plagiarize" + "steal" أو CLO يحجب
     assert result.vetoed_by in ("safety_dept", "ethics_advisor", "clo")
@@ -115,10 +119,9 @@ def test_e2e_uber_eats_budget_overflow():
     req = SwarmRequest(
         question="Build a food delivery app",
         type="code",
-        estimated_cost=100000,  # يفوق الحد 50000
     )
 
-    result = master.process(req)
+    result = master.process(req, authorization_context=get_system_auth())
     # CFO budget check → rejected
     assert result.verdict in ("rejected", "vetoed")
     assert result.vetoed_by == "cfo"
@@ -133,9 +136,8 @@ def test_e2e_uber_eats_full_development_lifecycle():
     req1 = SwarmRequest(
         question="Research the food delivery app market trends",
         type="research",
-        bypass_safety=True,
     )
-    r1 = master.process(req1)
+    r1 = master.process(req1, authorization_context=get_system_auth())
     assert r1.verdict == "approved"
     assert r1.executed_by == "research"
 
@@ -144,9 +146,8 @@ def test_e2e_uber_eats_full_development_lifecycle():
         question="Design the app interface",
         type="design",
         context={"brand_name": "EatsApp"},
-        bypass_safety=True,
     )
-    r2 = master.process(req2)
+    r2 = master.process(req2, authorization_context=get_system_auth())
     assert r2.verdict == "approved"
     assert r2.executed_by == "design"
 
@@ -154,9 +155,8 @@ def test_e2e_uber_eats_full_development_lifecycle():
     req3 = SwarmRequest(
         question="Build the backend API",
         type="code",
-        bypass_safety=True,
     )
-    r3 = master.process(req3)
+    r3 = master.process(req3, authorization_context=get_system_auth())
     assert r3.verdict == "approved"
     assert r3.executed_by == "code"
 
@@ -165,9 +165,8 @@ def test_e2e_uber_eats_full_development_lifecycle():
         question="Translate the app to Arabic",
         type="language",
         context={"source_lang": "en", "target_lang": "ar"},
-        bypass_safety=True,
     )
-    r4 = master.process(req4)
+    r4 = master.process(req4, authorization_context=get_system_auth())
     assert r4.verdict == "approved"
     assert r4.executed_by == "language"
 
@@ -184,8 +183,7 @@ def test_e2e_uber_eats_status_reporting():
         master.process(SwarmRequest(
             question=f"Request {i}",
             type="code",
-            bypass_safety=True,
-        ))
+        ), authorization_context=get_system_auth())
 
     # Status should reflect all departments
     status = master.get_status()
@@ -211,8 +209,7 @@ def test_e2e_uber_eats_multi_request_independence():
         result = master.process(SwarmRequest(
             question=q,
             type="general",  # auto-route
-            bypass_safety=True,
-        ))
+        ), authorization_context=get_system_auth())
         results.append(result)
 
     # Each result should be independent
