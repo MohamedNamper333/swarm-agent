@@ -103,6 +103,10 @@ class DurableJob:
     last_heartbeat: Optional[datetime] = None
     deadline: Optional[datetime] = None
     metadata: Dict[str, Any] = field(default_factory=dict)
+    # Persistence fields
+    persisted_at: Optional[datetime] = None
+    repository_version: int = 0
+    tenant_id: str = "default"
 
     def __post_init__(self):
         if self.deadline is None and self.config.timeout_ms:
@@ -234,6 +238,9 @@ class DurableJob:
             "deadline": self.deadline.isoformat() if self.deadline else None,
             "current_worker": self.current_worker,
             "metadata": self.metadata,
+            "persisted_at": self.persisted_at.isoformat() if self.persisted_at else None,
+            "repository_version": self.repository_version,
+            "tenant_id": self.tenant_id,
             "events": [
                 {
                     "event_id": e.event_id,
@@ -277,6 +284,9 @@ class DurableJob:
             deadline=datetime.fromisoformat(data["deadline"]) if data.get("deadline") else None,
             current_worker=data.get("current_worker"),
             metadata=data.get("metadata", {}),
+            persisted_at=datetime.fromisoformat(data["persisted_at"]) if data.get("persisted_at") else None,
+            repository_version=data.get("repository_version", 0),
+            tenant_id=data.get("tenant_id", "default"),
         )
         if data.get("result"):
             r = data["result"]

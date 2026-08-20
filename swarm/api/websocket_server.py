@@ -11,6 +11,10 @@ from datetime import datetime
 from typing import Dict, List, Any, Optional, Set
 from dataclasses import dataclass, field
 from enum import Enum
+from dotenv import load_dotenv
+
+# Load environment variables from .env file
+load_dotenv()
 
 from fastapi import FastAPI, WebSocket, WebSocketDisconnect, Depends
 

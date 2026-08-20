@@ -18,6 +18,9 @@ from swarm.enterprise.core.job.models import (
     DurableJob, JobQueue, JobStatus, JobResult, get_job_queue,
     JobPriority,
 )
+from swarm.enterprise.core.job.repository import (
+    JobRepository, create_job_repository, InMemoryJobRepository,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -31,6 +34,10 @@ class WorkerConfig:
     poll_interval_sec: int = 5
     graceful_shutdown_timeout_sec: int = 60
     job_types: List[str] = field(default_factory=list)  # Empty = all types
+    # Repository for persistence
+    job_repository: Optional[JobRepository] = None
+    repository_backend: str = "memory"  # "memory" or "redis"
+    repository_config: Dict[str, Any] = field(default_factory=dict)
 
 
 class JobExecutor:
@@ -57,6 +64,16 @@ class Worker:
         self.config = config
         self.executors = executors or {}
         self.queue = queue or get_job_queue()
+        
+        # Initialize repository
+        if config.job_repository:
+            self.job_repository = config.job_repository
+        else:
+            self.job_repository = create_job_repository(
+                config.repository_backend,
+                **config.repository_config,
+            )
+        
         self._running = False
         self._shutdown_event = threading.Event()
         self._active_jobs: Dict[str, DurableJob] = {}
@@ -112,6 +129,15 @@ class Worker:
             self._cancel_all_jobs("worker_force_stop")
 
         self._executor.shutdown(wait=graceful)
+        
+        # Close repository if it has close method
+        if self.job_repository and hasattr(self.job_repository, 'close'):
+            try:
+                import asyncio
+                asyncio.run(self.job_repository.close())
+            except Exception as e:
+                logger.warning(f"Error closing repository: {e}")
+        
         logger.info(f"Worker {self.config.worker_id} stopped")
 
     def _cancel_all_jobs(self, reason: str) -> None:
@@ -161,13 +187,36 @@ class Worker:
                         self.config.worker_id,
                         "heartbeat_timeout",
                     )
+                    # Persist failed state
+                    job.persisted_at = datetime.now(timezone.utc)
+                    job.repository_version += 1
+                    if self.job_repository:
+                        try:
+                            loop = asyncio.get_running_loop()
+                            loop.create_task(self.job_repository.save_job(job))
+                        except RuntimeError:
+                            pass
                 except Exception as e:
                     logger.error(f"Error failing stale job {job_id}: {e}")
 
         # Main loop — runs while worker is running
         while self._running:
-            # Scan for stale jobs
+            # Scan for stale jobs in local cache
             _fail_stale_jobs(_scan_stale_jobs())
+            
+            # Also check repository for stale jobs (for distributed workers)
+            if self.job_repository and hasattr(self.job_repository, 'get_stale_jobs'):
+                try:
+                    import asyncio
+                    stale_jobs = asyncio.run(self.job_repository.get_stale_jobs(
+                        max_heartbeat_age_seconds=timeout_sec,
+                        limit=100,
+                    ))
+                    for job in stale_jobs:
+                        if job.job_id not in self._active_jobs:
+                            logger.warning(f"Found stale job from repository: {job.job_id}")
+                except Exception as e:
+                    logger.debug(f"Repository stale check failed: {e}")
 
             # Sleep with shutdown awareness
             if self._shutdown_event.wait(timeout=self.config.heartbeat_interval_sec):
@@ -210,10 +259,28 @@ class Worker:
         if job.job_type not in self.executors:
             logger.error(f"No executor for job type: {job.job_type}")
             job.transition_to(JobStatus.FAILED, self.config.worker_id, f"No executor for {job.job_type}")
+            # Persist failure
+            if self.job_repository:
+                try:
+                    loop = asyncio.get_running_loop()
+                    loop.create_task(self.job_repository.save_job(job))
+                except RuntimeError:
+                    pass
             return
 
         with self._lock:
             self._active_jobs[job.job_id] = job
+        
+        # Update job status and persist
+        job.transition_to(JobStatus.RUNNING, self.config.worker_id)
+        job.persisted_at = datetime.now(timezone.utc)
+        job.repository_version += 1
+        if self.job_repository:
+            try:
+                loop = asyncio.get_running_loop()
+                loop.create_task(self.job_repository.save_job(job))
+            except RuntimeError:
+                pass
 
         future = self._executor.submit(self._execute_job, job)
         self._active_futures[job.job_id] = future
@@ -232,10 +299,7 @@ class Worker:
                     retryable=False,
                 )
 
-            # Transition to running
-            job.transition_to(JobStatus.RUNNING, self.config.worker_id)
-
-            # Execute
+            # Execute (status already RUNNING from _submit_job)
             start_time = time.time()
             result = executor.execute(job)
             execution_time = int((time.time() - start_time) * 1000)
@@ -282,14 +346,33 @@ class Worker:
                     if job.retry_count >= job.config.max_retries:
                         job.transition_to(JobStatus.DEAD_LETTER, self.config.worker_id, "Max retries exceeded")
 
+            # Persist final state
+            job.persisted_at = datetime.now(timezone.utc)
+            job.repository_version += 1
+            if self.job_repository:
+                try:
+                    loop = asyncio.get_running_loop()
+                    loop.create_task(self.job_repository.save_job(job))
+                except RuntimeError:
+                    pass
+
         except Exception as e:
             logger.exception(f"Job {job_id} callback error")
             job.transition_to(JobStatus.FAILED, self.config.worker_id, f"Callback error: {e}")
+            # Persist error state
+            job.persisted_at = datetime.now(timezone.utc)
+            job.repository_version += 1
+            if self.job_repository:
+                try:
+                    loop = asyncio.get_running_loop()
+                    loop.create_task(self.job_repository.save_job(job))
+                except RuntimeError:
+                    pass
 
     def get_status(self) -> Dict[str, Any]:
         """Get worker status."""
         with self._lock:
-            return {
+            status = {
                 "worker_id": self.config.worker_id,
                 "running": self._running,
                 "active_jobs": len(self._active_jobs),
@@ -297,6 +380,17 @@ class Worker:
                 "job_types": self.config.job_types,
                 "active_job_ids": list(self._active_jobs.keys()),
             }
+        
+        # Add repository health
+        if self.job_repository:
+            try:
+                import asyncio
+                repo_healthy = asyncio.run(self.job_repository.health_check())
+                status["repository_healthy"] = repo_healthy
+            except Exception:
+                status["repository_healthy"] = False
+        
+        return status
 
 
 class WorkerPool:

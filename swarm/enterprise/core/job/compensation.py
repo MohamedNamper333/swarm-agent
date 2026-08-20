@@ -12,6 +12,8 @@ from datetime import datetime, timezone
 import uuid
 import logging
 
+from .repository import JobRepository, create_job_repository, InMemoryJobRepository
+
 logger = logging.getLogger(__name__)
 
 
@@ -125,9 +127,10 @@ class WorkflowExecution:
 class CompensationEngine:
     """Executes workflows with automatic compensation on failure."""
 
-    def __init__(self):
+    def __init__(self, job_repository: Optional[JobRepository] = None):
         self._workflows: Dict[str, WorkflowExecution] = {}
         self._lock = threading.RLock()
+        self.job_repository = job_repository or create_job_repository("memory")
 
     def register_workflow(self, workflow: WorkflowExecution) -> None:
         """Register a workflow for execution."""
@@ -135,6 +138,17 @@ class CompensationEngine:
             # Validate and compute execution order
             workflow.execution_order = self._topological_sort(workflow)
             self._workflows[workflow.workflow_id] = workflow
+        
+        # Persist workflow
+        if self.job_repository:
+            # Fire-and-forget persistence (sync wrapper)
+            import asyncio
+            try:
+                loop = asyncio.get_running_loop()
+                loop.create_task(self.job_repository.save_workflow(workflow))
+            except RuntimeError:
+                # No running loop - run in background thread or skip
+                pass
 
     def _topological_sort(self, workflow: WorkflowExecution) -> List[str]:
         """Compute topological order using Kahn's algorithm (iterative).
@@ -185,6 +199,17 @@ class CompensationEngine:
 
         workflow.status = "running"
         workflow.started_at = datetime.now(timezone.utc)
+        
+        # Persist initial running state
+        if self.job_repository:
+            # Fire-and-forget persistence (sync wrapper)
+            import asyncio
+            try:
+                loop = asyncio.get_running_loop()
+                loop.create_task(self.job_repository.save_workflow(workflow))
+            except RuntimeError:
+                # No running loop - run in background thread or skip
+                pass
 
         try:
             for step_id in workflow.execution_order:
@@ -227,15 +252,42 @@ class CompensationEngine:
 
             workflow.status = "succeeded"
             workflow.completed_at = datetime.now(timezone.utc)
+            
+            # Persist final state
+            if self.job_repository:
+                try:
+                    loop = asyncio.get_running_loop()
+                    loop.create_task(self.job_repository.save_workflow(workflow))
+                except RuntimeError:
+                    pass
+            
             return workflow
 
         except Exception as e:
             logger.error(f"Workflow {workflow_id} failed at step {workflow.current_step}: {e}")
             workflow.error = str(e)
             workflow.status = "compensating"
+            
+            # Persist compensating state
+            if self.job_repository:
+                try:
+                    loop = asyncio.get_running_loop()
+                    loop.create_task(self.job_repository.save_workflow(workflow))
+                except RuntimeError:
+                    pass
+            
             self._compensate(workflow)
             workflow.status = "failed"
             workflow.completed_at = datetime.now(timezone.utc)
+            
+            # Persist final failed state
+            if self.job_repository:
+                try:
+                    loop = asyncio.get_running_loop()
+                    loop.create_task(self.job_repository.save_workflow(workflow))
+                except RuntimeError:
+                    pass
+            
             raise
 
     def _compensate(self, workflow: WorkflowExecution) -> None:
@@ -270,6 +322,11 @@ class CompensationEngine:
                 step.compensation_result = result
                 step.status = WorkflowStepStatus.COMPENSATED
                 logger.info(f"Compensated step {step_id}")
+                
+                # Persist after each compensation
+                if self.job_repository:
+                    import asyncio
+                    asyncio.create_task(self.job_repository.save_workflow(workflow))
             except Exception as e:
                 logger.error(f"Compensation failed for step {step_id}: {e}")
                 step.status = WorkflowStepStatus.COMPENSATION_FAILED
@@ -280,14 +337,45 @@ class CompensationEngine:
                 if policy.requires_manual_approval:
                     logger.critical(f"Manual approval required for compensation of {step_id}")
                     workflow.status = "requires_manual_approval"
+            
+            # Persist workflow after compensation phase
+            if self.job_repository:
+                try:
+                    loop = asyncio.get_running_loop()
+                    loop.create_task(self.job_repository.save_workflow(workflow))
+                except RuntimeError:
+                    pass
 
     def get_workflow(self, workflow_id: str) -> Optional[WorkflowExecution]:
         with self._lock:
-            return self._workflows.get(workflow_id)
+            workflow = self._workflows.get(workflow_id)
+            if workflow:
+                return workflow
+        
+        # Fallback to repository
+        if self.job_repository:
+            import asyncio
+            return asyncio.run(self.job_repository.get_workflow(workflow_id))
+        return None
 
     def list_workflows(self) -> List[WorkflowExecution]:
         with self._lock:
-            return list(self._workflows.values())
+            workflows = list(self._workflows.values())
+        
+        # Merge with repository if available
+        if self.job_repository:
+            try:
+                import asyncio
+                repo_workflows = asyncio.run(self.job_repository.list_workflows())
+                # Merge avoiding duplicates
+                seen = {w.workflow_id for w in workflows}
+                for w in repo_workflows:
+                    if w.workflow_id not in seen:
+                        workflows.append(w)
+            except Exception:
+                pass
+        
+        return workflows
 
 
 # Convenience function for simple workflows
