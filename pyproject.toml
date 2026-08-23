@@ -8,14 +8,14 @@ version = "0.4.0"
 description = "Distributed multi-agent orchestration runtime with constitutional governance, plugin extensibility, and live observability."
 readme = "README.md"
 requires-python = ">=3.10"
-license = { text = "MIT" }
+license = { text = "Apache-2.0" }
 authors = [{ name = "Mohamed Namper", email = "swarm@namper.dev" }]
 keywords = ["agents", "orchestration", "dag", "swarm", "constitutional-ai", "plugins"]
 classifiers = [
   "Development Status :: 4 - Beta",
   "Framework :: AsyncIO",
   "Intended Audience :: Developers",
-  "License :: OSI Approved :: MIT License",
+  "License :: OSI Approved :: Apache Software License",
   "Operating System :: OS Independent",
   "Programming Language :: Python :: 3",
   "Programming Language :: Python :: 3.10",
@@ -61,7 +61,7 @@ swarm = ["py.typed"]
 
 [tool.pytest.ini_options]
 minversion = "7.0"
-testpaths = ["tests/unit", "tests/live", "tests/stress", "tests/e2e"]
+testpaths = ["tests/unit", "tests/live", "tests/stress", "tests/e2e", "tests/enterprise"]
 addopts = [
   "-ra",
   "--strict-markers",
@@ -97,5 +97,5 @@ exclude_lines = [
   "pragma: no cover",
   "raise NotImplementedError",
   "if __name__ == .__main__.:",
-  "if TYPE_CHECKING:",
+  "if TYPE_CHECKING",
 ]
