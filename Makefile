@@ -1,109 +1,83 @@
 # swarm-agent Makefile
-# Convenience targets for the most common dev / CI / deploy workflows.
+# Convenience targets for development, verification and release.
 
 SHELL := /bin/bash
 PY   := python3
 PIP  := $(PY) -m pip
 PYTEST := $(PY) -m pytest
 
-# Always run tests with project root on PYTHONPATH so `swarm.*` and `vault_client` import.
 export PYTHONPATH := $(PWD)
 
 .DEFAULT_GOAL := help
 
 .PHONY: help
-help: ## Show this help.
-	@awk 'BEGIN {FS = ":.*?## "} /^[a-zA-Z_-]+:.*?## / {printf "  \033[36m%-22s\033[0m %s\n", $$1, $$2}' $(MAKEFILE_LIST)
-
-# --- install -----------------------------------------------------------------
+help: ## Show available targets.
+	@awk 'BEGIN {FS = ":.*?## "} /^[a-zA-Z_-]+:.*?## / {printf "  \033[36m%-24s\033[0m %s\n", $$1, $$2}' $(MAKEFILE_LIST)
 
 .PHONY: install
 install: ## Install package + dev extras.
 	$(PIP) install -e ".[dev]"
 
 .PHONY: install-all
-install-all: ## Install everything (dev + dashboard + vault).
+install-all: ## Install all optional extras.
 	$(PIP) install -e ".[all]"
 
-# --- test --------------------------------------------------------------------
-
 .PHONY: test
-test: ## Run all test suites (unit + live + stress + e2e).
+test: ## Run the complete test tree.
 	$(PYTEST) tests/ -q --no-header
 
 .PHONY: test-unit
-test-unit: ## Run unit tests only.
+test-unit: ## Run unit tests.
 	$(PYTEST) tests/unit/ -q --no-header
 
-.PHONY: test-live
-test-live: ## Run live / live pipeline tests.
-	$(PYTEST) tests/live/ -q --no-header
+.PHONY: test-enterprise
+test-enterprise: ## Run enterprise and architectural tests.
+	$(PYTEST) tests/enterprise/ -q --no-header
 
 .PHONY: test-stress
-test-stress: ## Run stress / load tests.
+test-stress: ## Run stress and recovery tests.
 	$(PYTEST) tests/stress/ -v --no-header
 
 .PHONY: test-e2e
-test-e2e: ## Run e2e integration tests.
+test-e2e: ## Run end-to-end tests.
 	$(PYTEST) tests/e2e/ -v --no-header
 
 .PHONY: test-cov
-test-cov: ## Run tests with coverage report.
-	$(PYTEST) tests/unit/ tests/live/ tests/stress/ --cov=swarm --cov-report=term-missing --cov-report=html --no-header
-
-# --- lint / type -------------------------------------------------------------
+test-cov: ## Run tests with coverage.
+	$(PYTEST) tests/unit/ tests/enterprise/ tests/stress/ --cov=swarm --cov-report=term-missing --cov-report=html --no-header
 
 .PHONY: lint
-lint: ## Run ruff on the swarm package.
-	$(PY) -m ruff check swarm/ || true
+lint: ## Run Ruff without suppressing failures.
+	$(PY) -m ruff check swarm tests
 
 .PHONY: typecheck
-typecheck: ## Run mypy on the swarm package.
-	$(PY) -m mypy swarm/ || true
+typecheck: ## Run mypy without suppressing failures.
+	$(PY) -m mypy swarm
 
-.PHONY: format
-format: ## Auto-format with ruff.
-	$(PY) -m ruff format swarm/ || true
+.PHONY: verify-invariants
+verify-invariants: ## Verify all 18 architectural invariants.
+	$(PY) scripts/verify_invariants.py
 
-# --- dashboard ---------------------------------------------------------------
+.PHONY: scan-secrets
+scan-secrets: ## Run fail-closed repository secret scan.
+	$(PY) scripts/scan_secrets.py
 
-.PHONY: dashboard
-dashboard: ## Start the Modern Dark Cinema dashboard (Vite + React).
-	cd dashboard/web && npm run dev
-
-.PHONY: dashboard-build
-dashboard-build: ## Build the dashboard for production.
-	cd dashboard/web && npm run build
-
-# --- vault -------------------------------------------------------------------
-
-.PHONY: vault
-vault: ## Start the local vault server on :8088.
-	$(PY) -m vault.server &
-
-# --- ci ----------------------------------------------------------------------
+.PHONY: production-gate
+production-gate: ## Execute the fail-closed production release gate.
+	$(PY) scripts/run_production_gate.py
 
 .PHONY: ci
-ci: test-unit test-stress lint typecheck ## Run the full CI gauntlet locally.
-	@echo "✅ CI gauntlet complete"
-
-# --- clean -------------------------------------------------------------------
+ci: lint test-unit test-enterprise verify-invariants scan-secrets test-stress ## Run the local CI gauntlet.
+	@echo "CI verification complete"
 
 .PHONY: clean
-clean: ## Remove build / cache artifacts.
-	rm -rf build/ dist/ *.egg-info .pytest_cache .ruff_cache .mypy_cache htmlcov/ .coverage
+clean: ## Remove Python build and cache artifacts.
+	rm -rf build/ dist/ *.egg-info .pytest_cache .ruff_cache .mypy_cache htmlcov/ .coverage artifacts/
 	find . -type d -name __pycache__ -exec rm -rf {} + 2>/dev/null || true
-	find . -type d -name .pytest_cache -exec rm -rf {} + 2>/dev/null || true
-
-.PHONY: clean-all
-clean-all: clean ## Also remove node_modules and dashboard build output.
-	rm -rf dashboard/web/node_modules dashboard/web/dist dashboard/web/.vite
-
-# --- info --------------------------------------------------------------------
 
 .PHONY: info
-info: ## Show environment + package metadata.
+info: ## Show environment and package metadata.
 	@echo "Python:  $$($(PY) --version)"
 	@echo "Pip:     $$($(PIP) --version)"
 	@echo "Pytest:  $$($(PY) -m pytest --version)"
-	@echo "Project: $$($(PY) -c 'import tomllib; print(tomllib.load(open(\"pyproject.toml\",\"rb\"))[\"project\"][\"name\"], tomllib.load(open(\"pyproject.toml\",\"rb\"))[\"project\"][\"version\"])')"
+	@echo "Project: $$($(PY) -c 'import tomllib; d=tomllib.load(open(\"pyproject.toml\",\"rb\")); print(d[\"project\"][\"name\"], d[\"project\"][\"version\"])')"
