@@ -1,30 +1,26 @@
-"""
-Production Release Gate — F-040: No Formal Production Gate fix.
+"""Fail-closed production release gate.
 
-Production release gate requiring:
-- P0 findings = 0
-- Critical Security = 0
-- Idempotency = verified
-- Budget = verified
-- Tenant Isolation = verified
-- Observability = verified
-- Recovery = verified
-- Load = passed
-- Chaos = passed
-- SAST = passed
-- Dependencies = passed
-- Secrets = clean
+The previous implementation returned success from placeholder checks. That was
+unsafe: a release gate that can report PASS without evidence is worse than no
+gate. This implementation only passes checks backed by the current checkout or
+explicit CI evidence files.
 """
+from __future__ import annotations
+
 from dataclasses import dataclass, field
-from typing import Dict, Any, Optional, List, Callable
-from enum import Enum
 from datetime import datetime, timezone
-import threading
+from enum import Enum
+import json
+from pathlib import Path
+import shutil
 import subprocess
-import logging
+import sys
+import threading
 import time
+from typing import Any, Callable, Dict, List, Optional
 
-logger = logging.getLogger(__name__)
+
+ROOT = Path(__file__).resolve().parents[5]
 
 
 class GateStatus(str, Enum):
@@ -36,28 +32,26 @@ class GateStatus(str, Enum):
 
 
 class GateSeverity(str, Enum):
-    BLOCKER = "blocker"      # Must pass for release
-    CRITICAL = "critical"    # Must pass for release
-    MAJOR = "major"          # Should pass, but can be waived
-    MINOR = "minor"          # Nice to have
-    INFO = "info"            # Informational
+    BLOCKER = "blocker"
+    CRITICAL = "critical"
+    MAJOR = "major"
+    MINOR = "minor"
+    INFO = "info"
 
 
 @dataclass(frozen=True)
 class GateCriteria:
-    """Criteria for a production gate."""
     gate_id: str
     name: str
     description: str
     severity: GateSeverity
-    check_fn: Callable[[], tuple[bool, str]]  # Returns (passed, message)
+    check_fn: Callable[[], tuple[bool, str]]
     category: str
     dependencies: List[str] = field(default_factory=list)
 
 
 @dataclass
 class GateResult:
-    """Result of a gate check."""
     gate_id: str
     name: str
     status: GateStatus
@@ -69,300 +63,155 @@ class GateResult:
 
 
 class ProductionGate:
-    """
-    Production release gate with formal criteria.
-    
-    All BLOCKER and CRITICAL gates must pass for release.
-    """
+    """Execute mandatory release checks and fail closed on missing evidence."""
 
-    def __init__(self):
+    def __init__(self) -> None:
         self._gates: Dict[str, GateCriteria] = {}
         self._results: Dict[str, GateResult] = {}
         self._lock = threading.RLock()
         self._register_default_gates()
 
-    def _register_default_gates(self):
-        """Register all default production gates."""
-        gates = [
-            # P0 Security Gates
-            GateCriteria(
-                gate_id="P0-001",
-                name="No P0 Security Findings",
-                description="All P0 security vulnerabilities must be resolved",
-                severity=GateSeverity.BLOCKER,
-                category="security",
-                check_fn=self._check_p0_security,
-            ),
-            GateCriteria(
-                gate_id="P0-002",
-                name="Critical Security Scan Clean",
-                description="SAST/DAST/SCA scans show no critical vulnerabilities",
-                severity=GateSeverity.BLOCKER,
-                category="security",
-                check_fn=self._check_critical_security,
-            ),
-            GateCriteria(
-                gate_id="P0-003",
-                name="No Exposed Secrets",
-                description="No secrets in code, config, or artifacts",
-                severity=GateSeverity.BLOCKER,
-                category="security",
-                check_fn=self._check_secrets,
-            ),
-
-            # Correctness Gates
-            GateCriteria(
-                gate_id="COR-001",
-                name="Idempotency Verified",
-                description="All mutating endpoints support idempotency keys",
-                severity=GateSeverity.CRITICAL,
-                category="correctness",
-                check_fn=self._check_idempotency,
-            ),
-            GateCriteria(
-                gate_id="COR-002",
-                name="Budget Atomicity Verified",
-                description="Budget reservations are atomic and race-free",
-                severity=GateSeverity.CRITICAL,
-                category="correctness",
-                check_fn=self._check_budget_atomicity,
-            ),
-            GateCriteria(
-                gate_id="COR-003",
-                name="Tenant Isolation Verified",
-                description="Cross-tenant access is 100% blocked",
-                severity=GateSeverity.CRITICAL,
-                category="correctness",
-                check_fn=self._check_tenant_isolation,
-            ),
-
-            # Observability Gates
-            GateCriteria(
-                gate_id="OBS-001",
-                name="Distributed Tracing Enabled",
-                description="All requests traced with trace_id, span_id",
-                severity=GateSeverity.CRITICAL,
-                category="observability",
-                check_fn=self._check_tracing,
-            ),
-            GateCriteria(
-                gate_id="OBS-002",
-                name="Metrics Collection Active",
-                description="p50/p95/p99 latency, error rates, fallback rates collected",
-                severity=GateSeverity.CRITICAL,
-                category="observability",
-                check_fn=self._check_metrics,
-            ),
-            GateCriteria(
-                gate_id="OBS-003",
-                name="Audit Ledger Active",
-                description="All critical decisions recorded in audit ledger",
-                severity=GateSeverity.CRITICAL,
-                category="observability",
-                check_fn=self._check_audit,
-            ),
-
-            # Recovery Gates
-            GateCriteria(
-                gate_id="REC-001",
-                name="Worker Crash Recovery",
-                description="Durable jobs survive worker crashes",
-                severity=GateSeverity.CRITICAL,
-                category="recovery",
-                check_fn=self._check_worker_recovery,
-            ),
-            GateCriteria(
-                gate_id="REC-002",
-                name="Budget Ledger Recovery",
-                description="Budget ledger state recoverable after crash",
-                severity=GateSeverity.CRITICAL,
-                category="recovery",
-                check_fn=self._check_budget_recovery,
-            ),
-
-            # Performance Gates
-            GateCriteria(
-                gate_id="PERF-001",
-                name="Load Test Passed",
-                description="System handles expected load with <5% error rate",
-                severity=GateSeverity.CRITICAL,
-                category="performance",
-                check_fn=self._check_load_test,
-            ),
-            GateCriteria(
-                gate_id="PERF-002",
-                name="Chaos Tests Passed",
-                description="Worker crash, provider failure, network partition handled",
-                severity=GateSeverity.CRITICAL,
-                category="performance",
-                check_fn=self._check_chaos_test,
-            ),
-
-            # Quality Gates
-            GateCriteria(
-                gate_id="QUA-001",
-                name="SAST Scan Clean",
-                description="Static analysis shows no high-severity issues",
-                severity=GateSeverity.CRITICAL,
-                category="quality",
-                check_fn=self._check_sast,
-            ),
-            GateCriteria(
-                gate_id="QUA-002",
-                name="Dependencies Clean",
-                description="No vulnerable or outdated dependencies",
-                severity=GateSeverity.CRITICAL,
-                category="quality",
-                check_fn=self._check_dependencies,
-            ),
+    def _register_default_gates(self) -> None:
+        checks = [
+            ("P0-001", "Architectural invariants", GateSeverity.BLOCKER, "security", self._check_invariants),
+            ("P0-002", "Static analysis", GateSeverity.BLOCKER, "security", self._check_ruff),
+            ("P0-003", "Secret scan", GateSeverity.BLOCKER, "security", self._check_secrets),
+            ("COR-001", "Idempotency and correctness tests", GateSeverity.CRITICAL, "correctness", self._check_correctness),
+            ("COR-002", "Budget concurrency tests", GateSeverity.CRITICAL, "correctness", self._check_budget),
+            ("COR-003", "Tenant isolation tests", GateSeverity.CRITICAL, "correctness", self._check_tenant),
+            ("OBS-001", "Observability tests", GateSeverity.CRITICAL, "observability", self._check_observability),
+            ("REC-001", "Recovery tests", GateSeverity.CRITICAL, "recovery", self._check_recovery),
+            ("PERF-001", "Stress/load tests", GateSeverity.CRITICAL, "performance", self._check_load),
+            ("PERF-002", "Chaos/recovery tests", GateSeverity.CRITICAL, "performance", self._check_chaos),
+            ("QUA-001", "Dependency audit", GateSeverity.CRITICAL, "quality", self._check_dependencies),
         ]
-
-        for gate in gates:
-            self._gates[gate.gate_id] = gate
+        for gate_id, name, severity, category, check_fn in checks:
+            self._gates[gate_id] = GateCriteria(
+                gate_id=gate_id,
+                name=name,
+                description=f"Mandatory release evidence for {name}",
+                severity=severity,
+                category=category,
+                check_fn=check_fn,
+            )
 
     def register_gate(self, gate: GateCriteria) -> None:
-        """Register a custom gate."""
         with self._lock:
             self._gates[gate.gate_id] = gate
 
+    @staticmethod
+    def _run(command: List[str], timeout: int = 900) -> tuple[bool, str]:
+        completed = subprocess.run(
+            command,
+            cwd=ROOT,
+            text=True,
+            capture_output=True,
+            timeout=timeout,
+            check=False,
+        )
+        output = (completed.stdout + "\n" + completed.stderr).strip()
+        return completed.returncode == 0, output[-5000:]
+
+    @staticmethod
+    def _tool(name: str) -> bool:
+        return shutil.which(name) is not None
+
+    def _check_invariants(self) -> tuple[bool, str]:
+        return self._run([sys.executable, "scripts/verify_invariants.py"])
+
+    def _check_ruff(self) -> tuple[bool, str]:
+        if not self._tool("ruff"):
+            return False, "ruff is required; missing executable"
+        return self._run(["ruff", "check", "swarm", "tests"])
+
+    def _check_secrets(self) -> tuple[bool, str]:
+        if self._tool("gitleaks"):
+            return self._run(["gitleaks", "detect", "--source", ".", "--no-banner"])
+        return False, "gitleaks is required for the production profile; missing executable"
+
+    def _check_correctness(self) -> tuple[bool, str]:
+        return self._run([sys.executable, "-m", "pytest", "tests/enterprise", "tests/unit", "-q"], timeout=1200)
+
+    def _check_budget(self) -> tuple[bool, str]:
+        return self._run([sys.executable, "-m", "pytest", "tests/stress/test_concurrent_agents.py", "-q"], timeout=900)
+
+    def _check_tenant(self) -> tuple[bool, str]:
+        return self._run([sys.executable, "-m", "pytest", "tests/enterprise", "-q", "-k", "tenant"], timeout=900)
+
+    def _check_observability(self) -> tuple[bool, str]:
+        return self._run([sys.executable, "-m", "pytest", "tests/unit/test_observability.py", "-q"])
+
+    def _check_recovery(self) -> tuple[bool, str]:
+        return self._run([sys.executable, "-m", "pytest", "tests/stress/test_recovery_under_load.py", "tests/unit/test_recovery.py", "-q"], timeout=900)
+
+    def _check_load(self) -> tuple[bool, str]:
+        return self._run([sys.executable, "-m", "pytest", "tests/stress", "-q"], timeout=1200)
+
+    def _check_chaos(self) -> tuple[bool, str]:
+        return self._run([sys.executable, "-m", "pytest", "tests/stress/test_recovery_under_load.py", "-q"], timeout=900)
+
+    def _check_dependencies(self) -> tuple[bool, str]:
+        if not self._tool("pip-audit"):
+            return False, "pip-audit is required for the production profile; missing executable"
+        return self._run(["pip-audit", "-f", "json"], timeout=900)
+
     def run_all(self) -> Dict[str, Any]:
-        """Run all gates and return summary."""
-        results = {}
         with self._lock:
             self._results = {}
             for gate_id, gate in self._gates.items():
-                start = time.time()
+                started = time.monotonic()
                 try:
                     passed, message = gate.check_fn()
-                    duration = (time.time() - start) * 1000
-                    result = GateResult(
-                        gate_id=gate_id,
-                        name=gate.name,
-                        status=GateStatus.PASSED if passed else GateStatus.FAILED,
-                        severity=gate.severity,
-                        message=message,
-                        duration_ms=duration,
-                    )
-                except Exception as e:
-                    duration = (time.time() - start) * 1000
-                    result = GateResult(
-                        gate_id=gate_id,
-                        name=gate.name,
-                        status=GateStatus.ERROR,
-                        severity=gate.severity,
-                        message=f"Gate check error: {e}",
-                        duration_ms=duration,
-                    )
-                self._results[gate_id] = result
-                results[gate_id] = result
-
-        return self.get_summary()
+                    status = GateStatus.PASSED if passed else GateStatus.FAILED
+                except (OSError, subprocess.SubprocessError, Exception) as exc:
+                    passed = False
+                    status = GateStatus.ERROR
+                    message = f"Gate execution failed: {exc}"
+                self._results[gate_id] = GateResult(
+                    gate_id=gate_id,
+                    name=gate.name,
+                    status=status,
+                    severity=gate.severity,
+                    message=message,
+                    duration_ms=(time.monotonic() - started) * 1000,
+                )
+            return self.get_summary()
 
     def get_summary(self) -> Dict[str, Any]:
-        """Get gate summary."""
         with self._lock:
-            total = len(self._results)
-            passed = sum(1 for r in self._results.values() if r.status == GateStatus.PASSED)
-            failed = sum(1 for r in self._results.values() if r.status == GateStatus.FAILED)
-            errors = sum(1 for r in self._results.values() if r.status == GateStatus.ERROR)
-
-            blocker_failed = sum(
-                1 for r in self._results.values()
-                if r.status == GateStatus.FAILED and r.severity == GateSeverity.BLOCKER
-            )
-            critical_failed = sum(
-                1 for r in self._results.values()
-                if r.status == GateStatus.FAILED and r.severity == GateSeverity.CRITICAL
-            )
-
-            # Release decision
-            release_ready = blocker_failed == 0 and critical_failed == 0 and errors == 0
-
+            failed = [r for r in self._results.values() if r.status != GateStatus.PASSED]
+            blocker_failed = [r for r in failed if r.severity == GateSeverity.BLOCKER]
+            critical_failed = [r for r in failed if r.severity == GateSeverity.CRITICAL]
             return {
-                "release_ready": release_ready,
-                "total": total,
-                "passed": sum(1 for r in self._results.values() if r.status == GateStatus.PASSED),
-                "failed": failed,
-                "errors": errors,
-                "blocker_failed": blocker_failed,
-                "critical_failed": critical_failed,
-                "results": {k: {
-                    "gate_id": v.gate_id,
-                    "name": v.name,
-                    "status": v.status.value,
-                    "severity": v.severity.value,
-                    "message": v.message,
-                    "duration_ms": v.duration_ms,
-                } for k, v in self._results.items()},
+                "release_ready": not failed,
+                "total": len(self._results),
+                "passed": sum(r.status == GateStatus.PASSED for r in self._results.values()),
+                "failed": sum(r.status == GateStatus.FAILED for r in self._results.values()),
+                "errors": sum(r.status == GateStatus.ERROR for r in self._results.values()),
+                "blocker_failed": len(blocker_failed),
+                "critical_failed": len(critical_failed),
+                "results": {
+                    key: {
+                        "gate_id": value.gate_id,
+                        "name": value.name,
+                        "status": value.status.value,
+                        "severity": value.severity.value,
+                        "message": value.message,
+                        "duration_ms": round(value.duration_ms, 2),
+                        "checked_at": value.checked_at.isoformat(),
+                    }
+                    for key, value in self._results.items()
+                },
             }
 
-    # Gate check implementations
-    def _check_p0_security(self) -> tuple[bool, str]:
-        # In real implementation, query vulnerability database
-        return True, "No P0 findings (placeholder)"
-
-    def _check_critical_security(self) -> tuple[bool, str]:
-        # Run SAST/DAST/SCA scans
-        return True, "Critical security scans clean (placeholder)"
-
-    def _check_secrets(self) -> tuple[bool, str]:
-        # Scan for secrets in code/config
-        return True, "No exposed secrets (placeholder)"
-
-    def _check_idempotency(self) -> tuple[bool, str]:
-        from swarm.enterprise.core.idempotency.store import get_idempotency_store
-        store = get_idempotency_store()
-        # Check that all mutating endpoints have idempotency support
-        return True, "Idempotency verified for all mutating endpoints"
-
-    def _check_budget_atomicity(self) -> tuple[bool, str]:
-        from swarm.enterprise.core.budget.ledger import get_budget_ledger
-        ledger = get_budget_ledger()
-        # Run concurrent budget test
-        return True, "Budget atomicity verified"
-
-    def _check_tenant_isolation(self) -> tuple[bool, str]:
-        from swarm.enterprise.core.classification.multi_tenant import get_isolation_enforcer, ResourceType
-        enforcer = get_isolation_enforcer()
-        # Test cross-tenant access
-        return True, "Tenant isolation verified"
-
-    def _check_tracing(self) -> tuple[bool, str]:
-        from swarm.enterprise.core.observability.tracing import get_tracer
-        tracer = get_tracer()
-        return True, "Distributed tracing enabled"
-
-    def _check_metrics(self) -> tuple[bool, str]:
-        from swarm.enterprise.core.observability.tracing import get_metrics
-        metrics = get_metrics()
-        return True, "Metrics collection active"
-
-    def _check_audit(self) -> tuple[bool, str]:
-        from swarm.enterprise.core.audit.ledger import get_audit_ledger
-        ledger = get_audit_ledger()
-        return True, "Audit ledger active"
-
-    def _check_worker_recovery(self) -> tuple[bool, str]:
-        return True, "Worker crash recovery verified"
-
-    def _check_budget_recovery(self) -> tuple[bool, str]:
-        return True, "Budget ledger recovery verified"
-
-    def _check_load_test(self) -> tuple[bool, str]:
-        return True, "Load test passed"
-
-    def _check_chaos_test(self) -> tuple[bool, str]:
-        return True, "Chaos tests passed"
-
-    def _check_sast(self) -> tuple[bool, str]:
-        return True, "SAST scan clean"
-
-    def _check_dependencies(self) -> tuple[bool, str]:
-        return True, "Dependencies clean"
+    def write_report(self, path: str = "artifacts/production-gate.json") -> Path:
+        report_path = ROOT / path
+        report_path.parent.mkdir(parents=True, exist_ok=True)
+        report_path.write_text(json.dumps(self.get_summary(), indent=2), encoding="utf-8")
+        return report_path
 
 
-# Global production gate
-_production_gate: Optional["ProductionGate"] = None
+_production_gate: Optional[ProductionGate] = None
 _pg_lock = threading.Lock()
 
 
@@ -374,11 +223,4 @@ def get_production_gate() -> ProductionGate:
         return _production_gate
 
 
-__all__ = [
-    "GateStatus",
-    "GateSeverity",
-    "GateCriteria",
-    "GateResult",
-    "ProductionGate",
-    "get_production_gate",
-]
+__all__ = ["GateStatus", "GateSeverity", "GateCriteria", "GateResult", "ProductionGate", "get_production_gate"]
