@@ -19,8 +19,7 @@ import threading
 import time
 from typing import Any, Callable, Dict, List, Optional
 
-
-ROOT = Path(__file__).resolve().parents[5]
+ROOT = Path(__file__).resolve().parents[4]
 
 
 class GateStatus(str, Enum):
@@ -101,14 +100,7 @@ class ProductionGate:
 
     @staticmethod
     def _run(command: List[str], timeout: int = 900) -> tuple[bool, str]:
-        completed = subprocess.run(
-            command,
-            cwd=ROOT,
-            text=True,
-            capture_output=True,
-            timeout=timeout,
-            check=False,
-        )
+        completed = subprocess.run(command, cwd=ROOT, text=True, capture_output=True, timeout=timeout, check=False)
         output = (completed.stdout + "\n" + completed.stderr).strip()
         return completed.returncode == 0, output[-5000:]
 
@@ -125,9 +117,9 @@ class ProductionGate:
         return self._run(["ruff", "check", "swarm", "tests"])
 
     def _check_secrets(self) -> tuple[bool, str]:
-        if self._tool("gitleaks"):
-            return self._run(["gitleaks", "detect", "--source", ".", "--no-banner"])
-        return False, "gitleaks is required for the production profile; missing executable"
+        if not self._tool("gitleaks"):
+            return False, "gitleaks is required for the production profile; missing executable"
+        return self._run(["gitleaks", "detect", "--source", ".", "--no-banner"])
 
     def _check_correctness(self) -> tuple[bool, str]:
         return self._run([sys.executable, "-m", "pytest", "tests/enterprise", "tests/unit", "-q"], timeout=1200)
@@ -163,8 +155,7 @@ class ProductionGate:
                 try:
                     passed, message = gate.check_fn()
                     status = GateStatus.PASSED if passed else GateStatus.FAILED
-                except (OSError, subprocess.SubprocessError, Exception) as exc:
-                    passed = False
+                except Exception as exc:
                     status = GateStatus.ERROR
                     message = f"Gate execution failed: {exc}"
                 self._results[gate_id] = GateResult(
