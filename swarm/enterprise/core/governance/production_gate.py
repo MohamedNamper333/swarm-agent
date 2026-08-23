@@ -83,11 +83,11 @@ class ProductionGate:
             ("P0-003", "Secret scan", GateSeverity.BLOCKER, "security", self._check_secrets),
             ("COR-001", "Idempotency and correctness tests", GateSeverity.CRITICAL, "correctness", self._check_correctness),
             ("COR-002", "Budget concurrency tests", GateSeverity.CRITICAL, "correctness", self._check_budget),
-            ("COR-003", "Tenant isolation tests", GateSeverity.CRITICAL, "correctness", self._check_tenant),
+            ("COR-003", "Tenant isolation regression tests", GateSeverity.CRITICAL, "correctness", self._check_tenant),
             ("OBS-001", "Observability tests", GateSeverity.CRITICAL, "observability", self._check_observability),
             ("REC-001", "Recovery tests", GateSeverity.CRITICAL, "recovery", self._check_recovery),
             ("PERF-001", "Stress/load tests", GateSeverity.CRITICAL, "performance", self._check_load),
-            ("PERF-002", "Chaos/recovery tests", GateSeverity.CRITICAL, "performance", self._check_chaos),
+            ("PERF-002", "Failure recovery tests", GateSeverity.CRITICAL, "performance", self._check_chaos),
             ("QUA-001", "Dependency audit", GateSeverity.CRITICAL, "quality", self._check_dependencies),
         ]
         for gate_id, name, severity, category, check_fn in checks:
@@ -148,7 +148,7 @@ class ProductionGate:
         return self._run([sys.executable, "-m", "pytest", "tests/stress/test_concurrent_agents.py", "-q"], timeout=900)
 
     def _check_tenant(self) -> tuple[bool, str]:
-        return self._run([sys.executable, "-m", "pytest", "tests/enterprise", "-q", "-k", "tenant"], timeout=900)
+        return self._run([sys.executable, "-m", "pytest", "tests/enterprise/test_rest_enterprise.py", "tests/enterprise/test_swarm_master.py", "-q"], timeout=900)
 
     def _check_observability(self) -> tuple[bool, str]:
         return self._run([sys.executable, "-m", "pytest", "tests/unit/test_observability.py", "-q"])
@@ -165,7 +165,7 @@ class ProductionGate:
     def _check_dependencies(self) -> tuple[bool, str]:
         if not self._tool("pip-audit"):
             return False, "pip-audit is required for the production profile; missing executable"
-        return self._run(["pip-audit", "-f", "json"], timeout=900)
+        return self._run(["pip-audit"], timeout=900)
 
     def run_all(self) -> Dict[str, Any]:
         with self._lock:
