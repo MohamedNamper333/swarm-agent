@@ -1,0 +1,13 @@
+{
+  "total_requests": 101,
+  "successful": 101,
+  "failed": 0,
+  "error_rate": "0.00%",
+  "duration_s": 6.0,
+  "throughput_rps": 16.7,
+  "latency_p50_ms": 160.2,
+  "latency_p95_ms": 274.2,
+  "latency_p99_ms": 331.8,
+  "latency_max_ms": 760.4,
+  "timestamp": "2026-08-24T22:11:17.114027+00:00"
+}
