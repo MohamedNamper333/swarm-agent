@@ -1,5 +1,5 @@
 """
-Security - Encryption, key management, advanced security (DPoP, mTLS, Key Rotation), and audit logging.
+Security - Encryption, key management, advanced security (DPoP, mTLS, Key Rotation), audit logging.
 """
 
 from .encryption import (
@@ -48,7 +48,29 @@ except ImportError as e:
     logger = logging.getLogger(__name__)
     logger.warning(f"Advanced security modules not available: {e}")
 
+# HSM and CT Monitoring
+try:
+    from .hsm import (
+        HSMManager,
+        HSMBACKEND,
+        MockHSMBACKEND,
+        HSMKeyInfo,
+        create_hsm_manager,
+    )
+except ImportError:
+    pass
+
+try:
+    from .ct_monitor import (
+        CertificateTransparencyMonitor,
+        CTCertificate,
+        CTAlert,
+    )
+except ImportError:
+    pass
+
 __all__ = [
+    # Encryption
     "EncryptionAlgorithm",
     "KeyType",
     "KeyStatus",

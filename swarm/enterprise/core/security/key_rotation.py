@@ -1,8 +1,6 @@
 """Key Rotation - Automated key rotation management."""
 
-import asyncio
 import threading
-from abc import ABC, abstractmethod
 from dataclasses import dataclass, field
 from datetime import datetime, timezone, timedelta
 from enum import Enum
@@ -40,12 +38,12 @@ class KeyMetadata:
 
 
 class KeyRotationManager:
-    """Manages cryptographic key rotation."""
+    """Manages cryptographic key rotation with thread-safe operations."""
     
     def __init__(self):
         self._keys: Dict[str, KeyMetadata] = {}
         self._key_material: Dict[str, Any] = {}
-        self._lock = asyncio.Lock()
+        self._lock = threading.RLock()  # Use threading.RLock for sync access
         self._rotation_callbacks: List[Callable] = []
     
     def generate_key(
@@ -97,7 +95,7 @@ class KeyRotationManager:
     
     async def rotate_key(self, key_id: str, reason: str = "scheduled") -> str:
         """Rotate a key."""
-        async with self._lock:
+        with self._lock:
             old_meta = self._keys.get(key_id)
             if not old_meta:
                 raise ValueError(f"Key {key_id} not found")
@@ -106,21 +104,42 @@ class KeyRotationManager:
             old_meta.rotated_at = now_utc()
             
             new_key_id = f"{key_id}-v{int(now_utc().timestamp())}"
-            new_key = self.generate_key(
-                key_id=new_key_id,
-                key_type=old_meta.key_type,
-                algorithm=old_meta.algorithm,
-                rotation_interval_days=old_meta.rotation_interval_days,
-                policy=old_meta.rotation_policy,
-            )
             
-            for callback in self._rotation_callbacks:
-                try:
-                    await callback(new_key_id, self._keys[new_key_id])
-                except Exception as e:
-                    logger.error(f"Rotation callback failed: {e}")
+        # Generate new key (outside lock to avoid deadlock)
+        new_key = self.generate_key(
+            key_id=new_key_id,
+            key_type=old_meta.key_type,
+            algorithm=old_meta.algorithm,
+            rotation_interval_days=old_meta.rotation_interval_days,
+            policy=old_meta.rotation_policy,
+        )
+        
+        for callback in self._rotation_callbacks:
+            try:
+                result = callback(new_key_id, self.get_metadata(new_key_id))
+                if hasattr(result, '__await__'):
+                    await result
+            except Exception as e:
+                logger.error(f"Rotation callback failed: {e}")
+        
+        logger.info(f"Rotated key {key_id} -> {new_key_id} ({reason})")
+        return new_key_id
+    
+    async def revoke_key(self, key_id: str, reason: str = "compromise") -> bool:
+        """Revoke a key immediately."""
+        with self._lock:
+            metadata = self._keys.get(key_id)
+            if not metadata:
+                return False
             
-            return new_key_id
+            metadata.status = "revoked"
+            metadata.compromise_detected = True
+            metadata.rotated_at = now_utc()
+            
+            self._key_material.pop(key_id, None)
+        
+        logger.warning(f"Key {key_id} revoked: {reason}")
+        return True
     
     def get_active_keys(self, key_type: Optional[str] = None) -> List[KeyMetadata]:
         with self._lock:
@@ -143,5 +162,4 @@ class KeyRotationManager:
 
 
 def create_key_rotation_manager() -> KeyRotationManager:
-    """Create key rotation manager."""
     return KeyRotationManager()
