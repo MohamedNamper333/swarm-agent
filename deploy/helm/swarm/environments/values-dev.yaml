@@ -1,0 +1,86 @@
+# Development Environment Values
+global:
+  environment: development
+  imagePullPolicy: Always
+
+swarmMaster:
+  enabled: true
+  replicaCount: 1
+  resources:
+    limits:
+      cpu: 250m
+      memory: 256Mi
+    requests:
+      cpu: 100m
+      memory: 128Mi
+  autoscaling:
+    enabled: false
+
+governance:
+  enabled: true
+  replicaCount: 1
+  autoscaling:
+    enabled: false
+
+orchestration:
+  enabled: true
+  replicaCount: 1
+
+memory:
+  enabled: true
+  replicaCount: 1
+  persistence:
+    enabled: false  # No persistent storage in dev
+
+observability:
+  enabled: true
+  replicaCount: 1
+  persistence:
+    enabled: false
+
+routing:
+  enabled: true
+  replicaCount: 1
+
+policy:
+  enabled: true
+  replicaCount: 1
+
+state:
+  enabled: true
+  replicaCount: 1
+  persistence:
+    enabled: false
+
+artifact:
+  enabled: true
+  replicaCount: 1
+  persistence:
+    enabled: false
+
+audit:
+  enabled: true
+  replicaCount: 1
+
+budget:
+  enabled: true
+  replicaCount: 1
+
+execution:
+  enabled: true
+  replicaCount: 1
+  sandbox:
+    enableCgroups: false  # Disable cgroups in dev (no root)
+    enableNamespaces: false
+
+security:
+  podSecurityContext:
+    runAsNonRoot: false  # Allow root in dev
+  securityContext:
+    readOnlyRootFilesystem: false
+
+monitoring:
+  enabled: true
+  
+ingress:
+  enabled: false  # Use port-forward in dev

@@ -1,0 +1,16 @@
+{
+  "drill": "full_dr_drill",
+  "passed": true,
+  "rto_seconds": 0.5620906352996826,
+  "rpo_seconds": 60,
+  "rto_met": true,
+  "rpo_met": true,
+  "duration_seconds": 1.039591,
+  "steps": [
+    "pre_drill_health_check",
+    "failover_initiated",
+    "data_integrity_verified",
+    "post_failover_health_check"
+  ],
+  "errors": []
+}

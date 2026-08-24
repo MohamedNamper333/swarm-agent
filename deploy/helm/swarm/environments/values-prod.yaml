@@ -1,0 +1,174 @@
+# Production Environment Values
+global:
+  environment: production
+  imagePullPolicy: IfNotPresent
+
+swarmMaster:
+  enabled: true
+  replicaCount: 3
+  resources:
+    limits:
+      cpu: "1"
+      memory: 1Gi
+    requests:
+      cpu: 500m
+      memory: 512Mi
+  autoscaling:
+    enabled: true
+    minReplicas: 3
+    maxReplicas: 10
+    targetCPUUtilizationPercentage: 70
+  podDisruptionBudget:
+    enabled: true
+    minAvailable: 2
+
+governance:
+  enabled: true
+  replicaCount: 3
+  podDisruptionBudget:
+    enabled: true
+    minAvailable: 2
+
+orchestration:
+  enabled: true
+  replicaCount: 3
+
+memory:
+  enabled: true
+  replicaCount: 3
+  persistence:
+    enabled: true
+    size: 50Gi
+    storageClass: fast-ssd
+
+observability:
+  enabled: true
+  replicaCount: 3
+  persistence:
+    enabled: true
+    size: 50Gi
+    storageClass: fast-ssd
+
+routing:
+  enabled: true
+  replicaCount: 3
+
+policy:
+  enabled: true
+  replicaCount: 3
+
+state:
+  enabled: true
+  replicaCount: 3
+  persistence:
+    enabled: true
+    size: 20Gi
+    storageClass: fast-ssd
+
+artifact:
+  enabled: true
+  replicaCount: 3
+  persistence:
+    enabled: true
+    size: 100Gi
+    storageClass: standard
+
+audit:
+  enabled: true
+  replicaCount: 3
+  # Immutable audit log - requires high durability
+  persistence:
+    enabled: true
+    size: 100Gi
+    storageClass: standard
+  retention_days: 2555  # 7 years (compliance)
+
+budget:
+  enabled: true
+  replicaCount: 3
+
+execution:
+  enabled: true
+  replicaCount: 3
+  sandbox:
+    enableCgroups: true
+    enableNamespaces: true
+    seccompProfile: true
+    gVisor: true  # Use gVisor for stronger isolation in prod
+  podSecurityContext:
+    runAsNonRoot: true
+    runAsUser: 65534  # nobody
+    fsGroup: 65534
+  securityContext:
+    capabilities:
+      drop:
+        - ALL
+      add:
+        - SETUID
+        - SETGID
+    readOnlyRootFilesystem: true
+
+security:
+  podSecurityContext:
+    runAsNonRoot: true
+    runAsUser: 1000
+    fsGroup: 1000
+    seccompProfile:
+      type: RuntimeDefault
+  securityContext:
+    allowPrivilegeEscalation: false
+    capabilities:
+      drop:
+        - ALL
+    readOnlyRootFilesystem: true
+
+networkPolicy:
+  enabled: true
+  defaultDeny: true  # Zero-trust networking
+
+monitoring:
+  enabled: true
+  prometheus:
+    enabled: true
+  grafana:
+    enabled: true
+  alertmanager:
+    enabled: true
+    
+ingress:
+  enabled: true
+  className: nginx
+  annotations:
+    cert-manager.io/cluster-issuer: letsencrypt-prod
+    nginx.ingress.kubernetes.io/rate-limit: "100"
+    nginx.ingress.kubernetes.io/rate-limit-window: "1m"
+  hosts:
+    - host: api.swarm.example.com
+      paths:
+        - path: /
+          pathType: Prefix
+  tls:
+    - secretName: swarm-prod-tls
+      hosts:
+        - api.swarm.example.com
+
+# DR Configuration
+backup:
+  enabled: true
+  schedule: "0 */4 * * *"  # Every 4 hours (RPO < 5min with WAL)
+  retention_days: 30
+  
+disasterRecovery:
+  enabled: true
+  rto_seconds: 3600   # RTO < 1 hour
+  rpo_seconds: 300    # RPO < 5 minutes
+  secondary_region: us-west-2
+
+chaos:
+  enabled: false  # Disable chaos in production (use scheduled drills)
+
+serviceMesh:
+  enabled: true
+  type: istio
+  mtls:
+    mode: STRICT

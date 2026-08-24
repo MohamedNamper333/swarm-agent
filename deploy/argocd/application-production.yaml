@@ -1,0 +1,51 @@
+apiVersion: argoproj.io/v1alpha1
+kind: Application
+metadata:
+  name: swarm-production
+  namespace: argocd
+  finalizers:
+    - resources-finalizer.argocd.argoproj.io
+spec:
+  project: production
+  source:
+    repoURL: https://github.com/MohamedNamper333/swarm-agent.git
+    targetRevision: main
+    path: helm/swarm
+    helm:
+      releaseName: swarm-prod
+      valueFiles:
+        - $values/deploy/helm/swarm/environments/values-prod.yaml
+  destination:
+    server: https://kubernetes.default.svc
+    namespace: swarm-production
+  syncPolicy:
+    syncOptions:
+      - CreateNamespace=true
+      - ServerSideApply=true
+    retry:
+      limit: 3
+      interval: 60s
+      backoff:
+        duration: 30s
+        factor: 2
+        maxDuration: 5m
+---
+apiVersion: argoproj.io/v1alpha1
+kind: AppProject
+metadata:
+  name: production
+  namespace: argocd
+spec:
+  description: Swarm Production Project
+  sourceRepos:
+    - https://github.com/MohamedNamper333/swarm-agent.git
+  destinations:
+    - namespace: swarm-production
+      server: https://kubernetes.default.svc
+  clusterResourceWhitelist:
+    - group: ""
+      kind: Namespace
+  roles:
+    - name: admin
+      policies:
+        - p, proj:production:admin, applications, *, production/*, allow

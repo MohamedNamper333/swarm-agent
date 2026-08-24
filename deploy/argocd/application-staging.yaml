@@ -1,0 +1,54 @@
+apiVersion: argoproj.io/v1alpha1
+kind: Application
+metadata:
+  name: swarm-staging
+  namespace: argocd
+  finalizers:
+    - resources-finalizer.argocd.argoproj.io
+spec:
+  project: staging
+  source:
+    repoURL: https://github.com/MohamedNamper333/swarm-agent.git
+    targetRevision: main
+    path: helm/swarm
+    helm:
+      releaseName: swarm-staging
+      valueFiles:
+        - $values/deploy/helm/swarm/environments/values-staging.yaml
+  destination:
+    server: https://kubernetes.default.svc
+    namespace: swarm-staging
+  syncPolicy:
+    automated:
+      prune: true
+      selfHeal: true
+    syncOptions:
+      - CreateNamespace=true
+      - ServerSideApply=true
+    retry:
+      limit: 5
+      interval: 30s
+      backoff:
+        duration: 15s
+        factor: 2
+        maxDuration: 3m
+---
+apiVersion: argoproj.io/v1alpha1
+kind: AppProject
+metadata:
+  name: staging
+  namespace: argocd
+spec:
+  description: Swarm Staging Project
+  sourceRepos:
+    - https://github.com/MohamedNamper333/swarm-agent.git
+  destinations:
+    - namespace: swarm-staging
+      server: https://kubernetes.default.svc
+  clusterResourceWhitelist:
+    - group: ""
+      kind: Namespace
+  roles:
+    - name: admin
+      policies:
+        - p, proj:staging:admin, applications, *, staging/*, allow
