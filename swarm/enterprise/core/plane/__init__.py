@@ -1,4 +1,30 @@
-"""Plane - Control plane and execution plane."""
-from .control_plane import ControlPlane, get_control_plane, AdmissionRequest
-from .execution_plane import ExecutionPlane, get_execution_plane, SwarmProcessExecutor
-__all__ = ["ControlPlane", "get_control_plane", "AdmissionRequest", "ExecutionPlane", "get_execution_plane", "SwarmProcessExecutor"]
+"""
+Plane - Control Plane and Execution Plane.
+Separated for horizontal scaling (F-028).
+"""
+
+from .contracts import (
+    IAdmissionControl,
+    IPolicyEnforcement,
+    IBudgetEnforcement,
+    IRoutingAdapter,
+    IExecutorRegistry,
+    IWorkerManager,
+    PlaneAdmissionRequest,
+    PlaneAdmissionResult,
+    PlaneJobResult,
+)
+
+__all__ = [
+    # Contracts
+    "IAdmissionControl",
+    "IPolicyEnforcement",
+    "IBudgetEnforcement",
+    "IRoutingAdapter",
+    "IExecutorRegistry",
+    "IWorkerManager",
+    # Data Classes
+    "PlaneAdmissionRequest",
+    "PlaneAdmissionResult",
+    "PlaneJobResult",
+]
