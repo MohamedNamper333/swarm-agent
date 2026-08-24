@@ -355,7 +355,14 @@ class CompensationEngine:
         # Fallback to repository
         if self.job_repository:
             import asyncio
-            return asyncio.run(self.job_repository.get_workflow(workflow_id))
+            try:
+                loop = asyncio.get_running_loop()
+                import concurrent.futures
+                with concurrent.futures.ThreadPoolExecutor() as executor:
+                    future = executor.submit(asyncio.run, self.job_repository.get_workflow(workflow_id))
+                    return future.result()
+            except RuntimeError:
+                return asyncio.run(self.job_repository.get_workflow(workflow_id))
         return None
 
     def list_workflows(self) -> List[WorkflowExecution]:
@@ -366,7 +373,14 @@ class CompensationEngine:
         if self.job_repository:
             try:
                 import asyncio
-                repo_workflows = asyncio.run(self.job_repository.list_workflows())
+                try:
+                    loop = asyncio.get_running_loop()
+                    import concurrent.futures
+                    with concurrent.futures.ThreadPoolExecutor() as executor:
+                        future = executor.submit(asyncio.run, self.job_repository.list_workflows())
+                        repo_workflows = future.result()
+                except RuntimeError:
+                    repo_workflows = asyncio.run(self.job_repository.list_workflows())
                 # Merge avoiding duplicates
                 seen = {w.workflow_id for w in workflows}
                 for w in repo_workflows:

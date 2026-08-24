@@ -1,0 +1,64 @@
+apiVersion: v2
+name: swarm
+description: Swarm Enterprise Platform - Complete Enterprise Core
+type: application
+version: 1.0.0
+appVersion: "1.0.0"
+keywords:
+  - enterprise
+  - platform
+  - distributed-systems
+  - governance
+  - orchestration
+maintainers:
+  - name: Swarm Team
+    email: team@swarm.example.com
+dependencies:
+  - name: governance
+    version: "1.0.0"
+    repository: "file://../swarm/governance"
+    condition: governance.enabled
+  - name: orchestration
+    version: "1.0.0"
+    repository: "file://../swarm/orchestration"
+    condition: orchestration.enabled
+  - name: memory
+    version: "1.0.0"
+    repository: "file://../swarm/memory"
+    condition: memory.enabled
+  - name: observability
+    version: "1.0.0"
+    repository: "file://../swarm/observability"
+    condition: observability.enabled
+  - name: routing
+    version: "1.0.0"
+    repository: "file://../swarm/routing"
+    condition: routing.enabled
+  - name: policy
+    version: "1.0.0"
+    repository: "file://../swarm/policy"
+    condition: policy.enabled
+  - name: state
+    version: "1.0.0"
+    repository: "file://../swarm/state"
+    condition: state.enabled
+  - name: artifact
+    version: "1.0.0"
+    repository: "file://../swarm/artifact"
+    condition: artifact.enabled
+  - name: audit
+    version: "1.0.0"
+    repository: "file://../swarm/audit"
+    condition: audit.enabled
+  - name: budget
+    version: "1.0.0"
+    repository: "file://../swarm/budget"
+    condition: budget.enabled
+  - name: execution
+    version: "1.0.0"
+    repository: "file://../swarm/execution"
+    condition: execution.enabled
+  - name: swarm-master
+    version: "1.0.0"
+    repository: "file://../swarm/swarm-master"
+    condition: swarmMaster.enabled

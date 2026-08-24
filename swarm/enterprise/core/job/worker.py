@@ -134,7 +134,14 @@ class Worker:
         if self.job_repository and hasattr(self.job_repository, 'close'):
             try:
                 import asyncio
-                asyncio.run(self.job_repository.close())
+                try:
+                    loop = asyncio.get_running_loop()
+                    import concurrent.futures
+                    with concurrent.futures.ThreadPoolExecutor() as executor:
+                        future = executor.submit(asyncio.run, self.job_repository.close())
+                        future.result()
+                except RuntimeError:
+                    asyncio.run(self.job_repository.close())
             except Exception as e:
                 logger.warning(f"Error closing repository: {e}")
         
@@ -208,10 +215,23 @@ class Worker:
             if self.job_repository and hasattr(self.job_repository, 'get_stale_jobs'):
                 try:
                     import asyncio
-                    stale_jobs = asyncio.run(self.job_repository.get_stale_jobs(
-                        max_heartbeat_age_seconds=timeout_sec,
-                        limit=100,
-                    ))
+                    try:
+                        loop = asyncio.get_running_loop()
+                        import concurrent.futures
+                        with concurrent.futures.ThreadPoolExecutor() as executor:
+                            future = executor.submit(
+                                asyncio.run,
+                                self.job_repository.get_stale_jobs(
+                                    max_heartbeat_age_seconds=timeout_sec,
+                                    limit=100,
+                                )
+                            )
+                            stale_jobs = future.result()
+                    except RuntimeError:
+                        stale_jobs = asyncio.run(self.job_repository.get_stale_jobs(
+                            max_heartbeat_age_seconds=timeout_sec,
+                            limit=100,
+                        ))
                     for job in stale_jobs:
                         if job.job_id not in self._active_jobs:
                             logger.warning(f"Found stale job from repository: {job.job_id}")

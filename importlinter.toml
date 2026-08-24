@@ -1,0 +1,45 @@
+[tool.importlinter]
+root_package = "swarm"
+
+[[tool.importlinter.contracts]]
+name = "Module Independence"
+type = "independence"
+modules = [
+  # Core modules - should be independent of each other
+  "swarm.enterprise.core.auth",
+  "swarm.enterprise.core.budget",
+  "swarm.enterprise.core.routing",
+  "swarm.enterprise.core.policy",
+  "swarm.enterprise.core.plane",
+  "swarm.enterprise.core.orchestration",
+  "swarm.enterprise.core.execution",
+  "swarm.enterprise.core.observability",
+  "swarm.enterprise.core.job",
+  "swarm.enterprise.core.memory",
+  "swarm.enterprise.core.artifact",
+  "swarm.enterprise.core.audit",
+  "swarm.enterprise.core.bus",
+  "swarm.enterprise.core.classification",
+  "swarm.enterprise.core.deployment",
+  "swarm.enterprise.core.errors",
+  "swarm.enterprise.core.gateway",
+  "swarm.enterprise.core.governance",
+  "swarm.enterprise.core.idempotency",
+  "swarm.enterprise.core.persistence",
+  "swarm.enterprise.core.security",
+  "swarm.enterprise.core.servicemesh",
+  "swarm.enterprise.core.state",
+  "swarm.enterprise.core.testing",
+  "swarm.enterprise.core.tracing",
+  "swarm.enterprise.core.verification",
+  # Department modules - should be independent
+  "swarm.enterprise.board",
+  "swarm.enterprise.csuite",
+  "swarm.enterprise.code",
+  "swarm.enterprise.design",
+  "swarm.enterprise.video",
+  "swarm.enterprise.research",
+  "swarm.enterprise.data",
+  "swarm.enterprise.knowledge",
+  "swarm.enterprise.safety"
+]

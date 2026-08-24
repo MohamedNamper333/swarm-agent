@@ -1,0 +1,14 @@
+apiVersion: v2
+name: governance
+description: Governance submodule - Policy enforcement, compliance, audit trails
+type: application
+version: 1.0.0
+appVersion: "1.0.0"
+keywords:
+  - governance
+  - policy
+  - compliance
+  - audit
+maintainers:
+  - name: Swarm Team
+    email: team@swarm.example.com

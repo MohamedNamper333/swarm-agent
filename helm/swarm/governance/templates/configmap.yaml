@@ -1,0 +1,12 @@
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: {{ include "governance.fullname" . }}-config
+  labels:
+    {{- include "governance.labels" . | nindent 4 }}
+data:
+  GOVERNANCE_POLICY_ENGINE: "{{ .Values.config.policyEngine.enabled | quote }}"
+  GOVERNANCE_COMPLIANCE: "{{ .Values.config.compliance.enabled | quote }}"
+  GOVERNANCE_AUDIT: "{{ .Values.config.audit.enabled | quote }}"
+  GOVERNANCE_COMPLIANCE_FRAMEWORKS: "{{ .Values.config.compliance.frameworks | toJson }}"
+  GOVERNANCE_AUDIT_STORAGE: "{{ .Values.config.audit.storage }}"

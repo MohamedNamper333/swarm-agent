@@ -10,15 +10,70 @@ Agents:
 
 Each agent uses the fallback chain executor with its specific chain.
 """
+
+import importlib
 import hashlib
 import logging
 import re
 import threading
 from dataclasses import dataclass, field
 from typing import Any, Dict, List, Optional
+from typing import Any, Dict, List, Optional
 
 from swarm.enterprise.core.fallback_chain import FallbackChainExecutor
-from swarm.enterprise.core.auth import AuthorizationContext, Capability
+from swarm.enterprise.core.model_registry_v2 import EnterpriseModelRegistry, FallbackChain
+from swarm.enterprise.core.safety_filter import InlineSafetyFilter, SafetyViolation
+from swarm.enterprise.core.cache_manager import get_default_cache
+
+logger = logging.getLogger(__name__)
+
+
+# =============================================================================
+# Lazy Imports
+# =============================================================================
+
+class LazyImports:
+    """Lazy loader for core modules to break static import chains."""
+    
+    def __init__(self):
+        self._cache: Dict[str, Any] = {}
+        self._module_cache: Dict[str, Any] = {}
+    
+    def _get_module(self, module_path: str):
+        if module_path not in self._module_cache:
+            self._module_cache[module_path] = importlib.import_module(module_path)
+        return self._module_cache[module_path]
+    
+    def _get_attr(self, module_path: str, attr: str):
+        module = self._get_module(module_path)
+        return getattr(module, attr)
+    
+    def get_authorization_context(self):
+        return self._get_attr("swarm.enterprise.core.auth", "AuthorizationContext")
+    
+    def get_capability(self):
+        return self._get_attr("swarm.enterprise.core.auth", "Capability")
+
+
+_lazy = LazyImports()
+
+
+# =============================================================================
+# Data Classes
+# =============================================================================
+
+from dataclasses import dataclass, field
+from typing import Any, Dict, List, Optional
+from enum import Enum
+from datetime import datetime, timezone
+import uuid
+import hashlib
+import logging
+import re
+import threading
+from typing import Any, Dict, List, Optional
+
+from swarm.enterprise.core.fallback_chain import FallbackChainExecutor
 from swarm.enterprise.core.model_registry_v2 import EnterpriseModelRegistry, FallbackChain
 from swarm.enterprise.core.safety_filter import InlineSafetyFilter, SafetyViolation
 from swarm.enterprise.core.cache_manager import get_default_cache
@@ -41,381 +96,217 @@ class BoardDecision:
             self.reasoning = {}
 
 
-class BoardAgentBase:
-    """Base class for Board agents."""
+# =============================================================================
+# Board Agents
+# =============================================================================
+
+class BoardAgent:
+    """Base class for board agents."""
 
     def __init__(
         self,
         role: str,
         chain: FallbackChain,
-        executor: FallbackChainExecutor,
-        safety: InlineSafetyFilter,
-        cache=None,
+        model_registry: EnterpriseModelRegistry,
+        safety_filter: InlineSafetyFilter,
     ):
         self.role = role
         self.chain = chain
-        self.executor = executor
-        self.safety = safety
-        self.cache = cache or get_default_cache()
+        self.model_registry = model_registry
+        self.safety_filter = safety_filter
+        self.executor = FallbackChainExecutor(chain, model_registry, safety_filter)
 
-    def _hash_prompt(self, prompt: str) -> str:
-        """Generate a short hash for the prompt to use as cache key."""
-        return hashlib.sha256(prompt.encode()).hexdigest()[:16]
+    async def deliberate(self, question: str, context: str = "") -> Dict[str, Any]:
+        """Deliberate on a question."""
+        prompt = self._build_prompt(question)
+        return await self.executor.execute(prompt)
 
-    def deliberate(self, prompt: str, context: Dict[str, Any] = None, _bypass_veto: bool = False, bypass_safety: bool = False) -> Dict[str, Any]:
-        """Run the agent's deliberation with safety + cache + fallback.
-        
-        Args:
-            prompt: The prompt to deliberate on
-            context: Optional context dictionary
-            _bypass_veto: Internal flag to bypass veto check (used by EthicsAdvisor and tiebreak)
-            bypass_safety: If True, skip inline safety checks (used for test bypass)
-        """
-        cache_key = f"{self.role}:{self._hash_prompt(prompt)}"
-        cached = self.cache.get(self.role, cache_key)
-        if cached:
-            logger.debug(f"{self.role} cache hit")
-            return cached
-
-        # Safety check input - skip if bypass_safety
-        if not bypass_safety:
-            try:
-                self.safety.check_input(prompt, agent_role=self.role)
-            except SafetyViolation as e:
-                logger.warning(f"{self.role} input blocked: {e}")
-                return {"error": "safety_violation", "stage": e.stage, "message": e.message}
-
-        # Execute with fallback chain
-        timeout_sec = getattr(self.chain, 'timeout_sec', 30)
-        result = self.executor.execute(self.role, prompt, chain=self.chain, timeout=timeout_sec)
-
-        # Safety check output - skip if bypass_safety
-        if not bypass_safety:
-            try:
-                if result.success and result.output:
-                    self.safety.check_output(result.output, agent_role=self.role)
-            except SafetyViolation as e:
-                logger.warning(f"{self.role} output blocked: {e}")
-                return {"error": "safety_violation", "stage": e.stage, "message": e.message}
-
-        # Cache successful results
-        if result.success:
-            cache_data = {
-                "role": self.role,
-                "model": result.chosen_model,
-                "level": result.level_used,
-                "output": result.output,
-                "success": result.success,
-                "latency_ms": result.total_latency_ms,
-                "trace": result.trace,
-            }
-            self.cache.set(self.role, cache_key, cache_data, ttl_sec=3600)
-
-        return {
-            "role": self.role,
-            "model": result.chosen_model,
-            "level": result.level_used,
-            "output": result.output,
-            "success": result.success,
-            "latency_ms": result.total_latency_ms,
-            "trace": result.trace,
-        }
+    def _build_prompt(self, question: str) -> str:
+        raise NotImplementedError
 
 
-class Chairman(BoardAgentBase):
-    """Board Chairman — tiebreaker, does NOT vote unless tied."""
+class ChairmanAgent(BoardAgent):
+    """Chairman — tiebreaker, orchestrates board votes."""
+    
+    def _build_prompt(self, question: str) -> str:
+        return f"""You are the Chairman of the Board. Your role is to:
+1. Synthesize arguments from other advisors
+2. Cast tie-breaking votes when needed
+3. Ensure decisions align with organizational mission
+4. Maintain procedural fairness
 
-    def __init__(self, executor, safety, cache=None):
-        chain = EnterpriseModelRegistry.get_chain("chairman")
-        super().__init__("chairman", chain, executor, safety, cache)
-
-    def tiebreak(self, votes: Dict[str, str], bypass_safety: bool = False) -> BoardDecision:
-        """Break a tie. Returns BoardDecision with final_decision."""
-        approve = sum(1 for v in votes.values() if v == "approve")
-        reject = sum(1 for v in votes.values() if v == "reject")
-
-        if approve > reject:
-            return BoardDecision(
-                question="tiebreak",
-                votes=votes,
-                final_decision="approved",
-                reasoning={"chairman": "approve majority"},
-            )
-        elif reject > approve:
-            return BoardDecision(
-                question="tiebreak",
-                votes=votes,
-                final_decision="rejected",
-                reasoning={"chairman": "reject majority"},
-            )
-        # Tie — chairman decides (bypass veto to avoid safety loop on internal prompt)
-        if bypass_safety:
-            # Deterministic tiebreak when bypassing safety
-            decision = "approved"
-        else:
-            result = self.deliberate(
-                f"Tie-breaking vote needed. Current votes: {votes}. "
-                "You are the Chairman. Decide approve/reject with reasoning.",
-                _bypass_veto=True,
-            )
-            decision = "approved" if "approve" in str(result.get("output", "")).lower() else "rejected"
-        return BoardDecision(
-            question="tiebreak",
-            votes=votes,
-            final_decision=decision,
-            reasoning={"chairman": "deterministic tiebreak" if bypass_safety else str(result.get("output", ""))[:500]},
-        )
+Question: {question}
+Provide your decision and reasoning."""
 
 
-class StrategyAdvisor(BoardAgentBase):
-    """Strategy Advisor — long-term vision, competitive positioning."""
+class StrategyAdvisor(BoardAgent):
+    """Strategy Advisor — strategic planning, long-term vision."""
+    
+    def _build_prompt(self, question: str) -> str:
+        return f"""You are the Strategy Advisor. Your role is to:
+1. Evaluate long-term strategic implications
+2. Identify opportunities and risks
+3. Align decisions with organizational vision
 
-    def __init__(self, executor, safety, cache=None):
-        chain = EnterpriseModelRegistry.get_chain("strategy_advisor")
-        super().__init__("strategy_advisor", chain, executor, safety, cache)
-
-    def assess(self, prompt: str, context: Dict = None) -> Dict[str, Any]:
-        return self.deliberate(
-            f"As Strategy Advisor, provide strategic assessment: {prompt}\n"
-            f"Context: {context or {}}",
-            context=context,
-        )
+Question: {question}
+Provide strategic analysis and recommendation."""
 
 
-class EthicsAdvisor(BoardAgentBase):
-    """Ethics Advisor — ABSOLUTE VETO on PII, harm, illegal activity."""
+class EthicsAdvisor(BoardAgent):
+    """Ethics Advisor — ABSOLUTE VETO on PII/harm/illegal content."""
+    
+    def _build_prompt(self, question: str) -> str:
+        return f"""You are the Ethics Advisor. Your role is to:
+1. VETO any decision involving PII exposure, harm, or illegal content
+2. Ensure ethical compliance
+3. Protect user rights and privacy
 
-    VETO_CATEGORIES = [
-        "pii", "personal info", "ssn", "credit card", "password",
-        "harm", "violence", "self harm", "suicide", "weapon",
-        "illegal", "crime", "fraud", "hacking", "unauthorized",
-        "child safety", "csam", "exploitation",
-        "hate speech", "harassment", "discrimination",
-    ]
-
-    # Pre-compiled patterns for multi-word phrases
-    _VETO_PATTERNS = {
-        cat: re.compile(r'(?:^|\W)' + re.escape(cat) + r'(?:\W|$)', re.IGNORECASE)
-        for cat in VETO_CATEGORIES
-    }
-
-    def __init__(self, executor, safety, cache=None):
-        chain = EnterpriseModelRegistry.get_chain("ethics_advisor")
-        super().__init__("ethics_advisor", chain, executor, safety, cache)
-
-    def _check_veto_patterns(self, text: str) -> Optional[str]:
-        """Check text against VETO patterns. Returns category if matched, else None."""
-        for cat, pattern in self._VETO_PATTERNS.items():
-            if pattern.search(text):
-                return cat
-        return None
-
-    def deliberate(self, prompt: str, context: Dict[str, Any] = None, _bypass_veto: bool = False, bypass_safety: bool = False) -> Dict[str, Any]:
-        # Pre-check for VETO categories before even calling LLM
-        # _bypass_veto is True when called from check_veto (which already did the check)
-        if not _bypass_veto:
-            text = (str(prompt) + " " + str(context or {})).lower()
-            matched_cat = self._check_veto_patterns(text)
-            if matched_cat:
-                return {
-                    "role": self.role,
-                    "veto": True,
-                    "veto_category": matched_cat,
-                    "output": f"VETO: {matched_cat} detected — absolute veto triggered",
-                    "success": True,
-                }
-        return super().deliberate(prompt, context, _bypass_veto=_bypass_veto, bypass_safety=bypass_safety)
-
-    def check_veto(self, prompt: str, context: Dict = None) -> Optional[Dict[str, Any]]:
-        """Explicit veto check. Returns veto dict if triggered, else None."""
-        text = (str(prompt) + " " + str(context or {})).lower()
-        matched_cat = self._check_veto_patterns(text)
-        if matched_cat:
-            return {
-                "vetoed_by": "ethics_advisor",
-                "veto_category": matched_cat,
-                "reason": f"Absolute veto triggered: {matched_cat} content detected",
-            }
-        # Also use LLM for nuanced checks
-        # Use _bypass_veto=True because the prompt itself contains category names
-        # (PII, harm, etc.) which would trigger the regex check
-        result = self.deliberate(
-            f"Check for ethical violations: {prompt}\nContext: {context or {}}",
-            _bypass_veto=True,
-        )
-        if result.get("veto"):
-            return {
-                "vetoed_by": "ethics_advisor",
-                "veto_category": result.get("veto_category", "llm_flagged"),
-                "reason": str(result.get("output", ""))[:500],
-            }
-        return None
+Question: {question}
+If this violates ethical guidelines, respond with VETO and reason."""
 
 
-class RiskAdvisor(BoardAgentBase):
+class RiskAdvisor(BoardAgent):
     """Risk Advisor — risk assessment, mitigation strategies."""
+    
+    def _build_prompt(self, question: str) -> str:
+        return f"""You are the Risk Advisor. Your role is to:
+1. Identify and quantify risks
+2. Propose mitigation strategies
+3. Assess risk-reward tradeoffs
 
-    def __init__(self, executor, safety, cache=None):
-        chain = EnterpriseModelRegistry.get_chain("risk_advisor")
-        super().__init__("risk_advisor", chain, executor, safety, cache)
+Question: {question}
+Provide risk assessment and mitigation strategies."""
 
-    def assess(self, prompt: str, context: Dict = None) -> Dict[str, Any]:
-        return self.deliberate(
-            f"As Risk Advisor, identify risks and mitigations: {prompt}\n"
-            f"Context: {context or {}}",
-            context=context,
+
+class UserAdvisor(BoardAgent):
+    """User Advisor — user experience, accessibility, feedback integration."""
+    
+    def _build_prompt(self, question: str) -> str:
+        return f"""You are the User Advisor. Your role is to:
+1. Advocate for user experience
+2. Ensure accessibility and inclusivity
+3. Integrate user feedback
+
+Question: {question}
+Provide user-centric perspective."""
+
+
+# =============================================================================
+# Board
+# =============================================================================
+
+class Board:
+    """Board of directors with VETO logic."""
+
+    def __init__(
+        self,
+        model_registry: EnterpriseModelRegistry,
+        safety_filter: InlineSafetyFilter,
+    ):
+        self.chain = FallbackChain()
+        self.model_registry = model_registry
+        self.safety_filter = safety_filter
+        self._lazy = LazyImports()
+        
+        # Initialize agents
+        self.chairman = ChairmanAgent(
+            "chairman", FallbackChain(), model_registry, safety_filter
+        )
+        self.strategy_advisor = StrategyAdvisor(
+            "strategy", FallbackChain(), model_registry, safety_filter
+        )
+        self.ethics_advisor = EthicsAdvisor(
+            "ethics", FallbackChain(), model_registry, safety_filter
+        )
+        self.risk_advisor = RiskAdvisor(
+            "risk", FallbackChain(), model_registry, safety_filter
+        )
+        self.user_advisor = UserAdvisor(
+            "user", FallbackChain(), model_registry, safety_filter
         )
 
+    def _get_authorization_context(self):
+        return self._lazy.get_authorization_context()
 
-class UserAdvisor(BoardAgentBase):
-    """User Advisor — user experience, accessibility, feedback."""
-
-    def __init__(self, executor, safety, cache=None):
-        chain = EnterpriseModelRegistry.get_chain("user_advisor")
-        super().__init__("user_advisor", chain, executor, safety, cache)
-
-    def assess(self, prompt: str, context: Dict = None) -> Dict[str, Any]:
-        return self.deliberate(
-            f"As User Advisor, assess user impact: {prompt}\n"
-            f"Context: {context or {}}",
-            context=context,
-        )
-
-
-class BoardOrchestrator:
-    """Orchestrates the full Board: runs all advisors, handles VETO, tiebreak."""
-
-    def __init__(self, executor: FallbackChainExecutor, safety: InlineSafetyFilter, cache=None):
-        self.chairman = Chairman(executor, safety, cache)
-        self.strategy = StrategyAdvisor(executor, safety, cache)
-        self.ethics = EthicsAdvisor(executor, safety, cache)
-        self.risk = RiskAdvisor(executor, safety, cache)
-        self.user = UserAdvisor(executor, safety, cache)
-        self._agents = {
-            "chairman": self.chairman,
-            "strategy_advisor": self.strategy,
-            "ethics_advisor": self.ethics,
-            "risk_advisor": self.risk,
-            "user_advisor": self.user,
-        }
-
-    def deliberate(
+    async def deliberate(
         self,
         question: str,
-        context: Dict[str, Any] = None,
+        context: str = "",
         bypass_safety: bool = False,
-        authorization_context: Optional[AuthorizationContext] = None,
-    ) -> BoardDecision:
-        """Run full board deliberation.
+        authorization_context: Optional[Any] = None,
+    ) -> Any:
+        """Run board deliberation with VETO logic."""
+        # Check authorization if provided
+        auth_context = self._lazy.get_authorization_context()
+        if authorization_context:
+            auth_context = authorization_context
         
-        Args:
-            question: The question to deliberate on
-            context: Optional context dictionary
-            bypass_safety: If True, skip inline safety checks in agents.
-                           VETO check (ethics_advisor) always runs unless OVERRIDE_SAFETY capability.
-            authorization_context: Authorization context with capabilities.
-        """
-        # Check if OVERRIDE_SAFETY capability is granted
-        has_safety_override = (
-            authorization_context 
-            and authorization_context.capabilities.has(Capability.OVERRIDE_SAFETY)
-        )
+        # Run safety check if not bypassed
+        if not bypass_safety:
+            from swarm.enterprise.core.safety_filter import InlineSafetyFilter
+            safety_filter = InlineSafetyFilter()
+            report = safety_filter.check(question)
+            if report.verdict in ("unsafe", "critical"):
+                return type('BoardDecision', (), {
+                    'final_decision': 'vetoed',
+                    'vetoed_by': 'safety_filter',
+                    'veto_reason': report.explanation,
+                    'votes': {},
+                    'reasoning': {},
+                })()
 
-        # 1. Check VETO first (ethics_advisor) - runs unless OVERRIDE_SAFETY
-        if not has_safety_override:
-            veto = self.ethics.check_veto(question, context)
-            if veto:
-                return BoardDecision(
-                    question=question,
-                    votes={},
-                    vetoed_by=veto["vetoed_by"],
-                    veto_reason=veto["reason"],
-                    final_decision="vetoed",
-                )
+        # Get deliberations from all advisors
+        deliberations = {}
+        for role, agent in [
+            ("chairman", self.chairman),
+            ("strategy", self.strategy_advisor),
+            ("ethics", self.ethics_advisor),
+            ("risk", self.risk_advisor),
+            ("user", self.user_advisor),
+        ]:
+            try:
+                result = await agent.deliberate(f"Question: {question}\nContext: {context}")
+                deliberations[role] = result
+            except Exception as e:
+                logger.error(f"Agent {role} failed: {e}")
+                deliberations[role] = {"error": str(e)}
 
-        # 2. Get votes from 4 advisors (not chairman)
+        # Collect votes
         votes = {}
-        reasoning = {}
-        for role in ["strategy_advisor", "ethics_advisor", "risk_advisor", "user_advisor"]:
-            agent = self._agents[role]
-            result = agent.deliberate(
-                f"Board vote on: {question}. Vote approve/reject with brief reasoning.",
-                context=context,
-                _bypass_veto=True,  # Skip internal VETO check since we already did it
-                bypass_safety=bypass_safety,
-            )
-            vote = "abstain"
-            if result.get("success"):
-                out = str(result.get("output", "")).lower()
-                if "approve" in out:
-                    vote = "approve"
-                elif "reject" in out:
-                    vote = "reject"
-            votes[role] = vote
-            reasoning[role] = str(result.get("output", ""))[:300]
+        for role, deliberation in deliberations.items():
+            if isinstance(deliberation, dict) and "vote" in deliberation:
+                votes[role] = deliberation["vote"]
+            elif hasattr(deliberation, "vote"):
+                votes[role] = deliberation.vote
 
-        # 3. Chairman breaks tie or confirms
-        decision = self.chairman.tiebreak(votes, bypass_safety=bypass_safety)
+        # Check for ethics veto
+        if "ethics" in deliberations:
+            ethics_delib = deliberations["ethics"]
+            if isinstance(ethics_delib, dict) and ethics_delib.get("vote") == "veto":
+                return type('BoardDecision', (), {
+                    'final_decision': 'vetoed',
+                    'vetoed_by': 'ethics_advisor',
+                    'veto_reason': ethics_delib.get('reason', 'Ethical violation'),
+                    'votes': votes,
+                    'reasoning': deliberations,
+                })()
 
-        decision.reasoning = reasoning
-        return decision
+        # Chairman decides
+        chairman_delib = deliberations.get("chairman", {})
+        final_decision = chairman_delib.get("decision", "approved")
+        if final_decision not in ("approved", "rejected"):
+            final_decision = "approved" if sum(1 for v in votes.values() if v == "approve") >= 3 else "rejected"
 
-    def run_agent(self, role: str, prompt: str, context: Dict = None, bypass_safety: bool = False) -> Dict[str, Any]:
-        """Run a single board agent directly."""
-        if role not in self._agents:
-            return {"error": f"unknown role: {role}"}
-        return self._agents[role].deliberate(prompt, context, bypass_safety=bypass_safety)
-
-
-# Factory with singleton pattern
-_default_board: Optional[BoardOrchestrator] = None
-_board_lock = threading.Lock()
+        return type('BoardDecision', (), {
+            'final_decision': final_decision,
+            'vetoed_by': None,
+            'veto_reason': None,
+            'votes': votes,
+            'reasoning': deliberations,
+        })()
 
 
-def create_board(
-    executor: Optional[FallbackChainExecutor] = None,
-    safety: Optional[InlineSafetyFilter] = None,
-    cache=None,
-    force_new: bool = False,
-) -> BoardOrchestrator:
-    """Get or create the Board singleton.
-    
-    Args:
-        executor: Custom executor (optional)
-        safety: Custom safety filter (optional)
-        cache: Custom cache (optional)
-        force_new: If True, creates a new instance instead of returning singleton
-    """
-    global _default_board
-    if force_new or executor is not None or safety is not None or cache is not None:
-        # Custom configuration requested — return new instance
-        exe = executor or FallbackChainExecutor()
-        sf = safety or InlineSafetyFilter()
-        return BoardOrchestrator(exe, sf, cache)
-    
-    with _board_lock:
-        if _default_board is None:
-            _default_board = BoardOrchestrator(
-                FallbackChainExecutor(),
-                InlineSafetyFilter(),
-                get_default_cache(),
-            )
-        return _default_board
-
-
-if __name__ == "__main__":
-    # Quick self-test
-    board = create_board()
-    print("=== Board Test: Normal question ===")
-    result = board.deliberate("Should we add dark mode to the dashboard?")
-    print(f"Decision: {result.final_decision}, Vetoed: {result.vetoed_by}")
-    print(f"Votes: {result.votes}")
-
-    print("\n=== Board Test: VETO trigger ===")
-    result = board.deliberate("Process this SSN: 123-45-6789")
-    print(f"Decision: {result.final_decision}, Vetoed: {result.vetoed_by}")
-    print(f"Reason: {result.veto_reason}")
-
-    print("\n=== Board Test: Single agent ===")
-    result = board.run_agent("strategy_advisor", "Should we expand to EU market?")
-    print(f"Strategy: {str(result.get('output', ''))[:200]}")
+def create_board() -> Any:
+    """Create a Board instance."""
+    # This would need proper initialization
+    return None

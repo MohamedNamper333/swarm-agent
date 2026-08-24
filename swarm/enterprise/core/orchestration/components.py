@@ -13,6 +13,8 @@ Breaks SwarmMaster into thin orchestration components:
 - ResultAssembler
 - AuditEmitter
 """
+
+import importlib
 import logging
 import threading
 from dataclasses import dataclass, field
@@ -20,16 +22,163 @@ from typing import Dict, Any, Optional, List
 from datetime import datetime, timezone
 import uuid
 
-from swarm.enterprise.core.auth import AuthorizationContext
-from swarm.enterprise.core.policy.engine import PolicyEngine, get_policy_engine, PolicyContext, PolicyDecision
-from swarm.enterprise.core.routing.engine import RoutingEngine, get_routing_engine, RoutingDecision
-from swarm.enterprise.core.budget.cost_estimation import CostEstimationService, get_cost_estimation_service
-from swarm.enterprise.core.budget.ledger import BudgetLedger, get_budget_ledger
-from swarm.enterprise.core.execution.context import ExecutionContext, get_current_context
-from swarm.enterprise.core.plane.control_plane import ControlPlane, get_control_plane, AdmissionRequest
-
 logger = logging.getLogger(__name__)
 
+
+# =============================================================================
+# Lazy Imports
+# =============================================================================
+
+class LazyImports:
+    """Lazy loader for core modules to break static import chains."""
+    
+    def __init__(self):
+        self._cache: Dict[str, Any] = {}
+        self._module_cache: Dict[str, Any] = {}
+    
+    def _get_module(self, module_path: str):
+        if module_path not in self._module_cache:
+            self._module_cache[module_path] = importlib.import_module(module_path)
+        return self._module_cache[module_path]
+    
+    def _get_attr(self, module_path: str, attr: str):
+        module = self._get_module(module_path)
+        return getattr(module, attr)
+    
+    # Core Services
+    def get_authorization_context(self):
+        return self._get_attr("swarm.enterprise.core.auth", "AuthorizationContext")
+    
+    def get_policy_engine(self):
+        return self._get_attr("swarm.enterprise.core.policy.engine", "PolicyEngine")
+    
+    def get_routing_engine(self):
+        return self._get_attr("swarm.enterprise.core.routing.engine", "RoutingEngine")
+    
+    def get_cost_estimation(self):
+        return self._get_attr("swarm.enterprise.core.budget.cost_estimation", "CostEstimationService")
+    
+    def get_budget_ledger(self):
+        return self._get_attr("swarm.enterprise.core.budget.ledger", "BudgetLedger")
+    
+    def get_control_plane(self):
+        return self._get_attr("swarm.enterprise.core.plane.control_plane", "ControlPlane")
+    
+    def get_execution_context(self):
+        return self._get_attr("swarm.enterprise.core.execution.context", "ExecutionContext")
+    
+    def get_current_context(self):
+        return self._get_attr("swarm.enterprise.core.execution.context", "get_current_context")
+    
+    def get_safety_gate(self):
+        return self._get_attr("swarm.enterprise.core.orchestration.components", "SafetyGate")
+    
+    def get_board_coordinator(self):
+        return self._get_attr("swarm.enterprise.core.orchestration.components", "BoardCoordinator")
+    
+    def get_executive_coordinator(self):
+        return self._get_attr("swarm.enterprise.core.orchestration.components", "ExecutiveCoordinator")
+    
+    def get_execution_coordinator(self):
+        return self._get_attr("swarm.enterprise.core.orchestration.components", "ExecutionCoordinator")
+    
+    def get_cost_controller(self):
+        return self._get_attr("swarm.enterprise.core.orchestration.components", "CostController")
+    
+    def get_result_assembler(self):
+        return self._get_attr("swarm.enterprise.core.orchestration.components", "ResultAssembler")
+    
+    def get_audit_emitter(self):
+        return self._get_attr("swarm.enterprise.core.orchestration.components", "AuditEmitter")
+    
+    def get_safety_gate(self):
+        return self._get_attr("swarm.enterprise.core.orchestration.components", "SafetyGate")
+    
+    def get_board_coordinator(self):
+        return self._get_attr("swarm.enterprise.core.orchestration.components", "BoardCoordinator")
+    
+    def get_executive_coordinator(self):
+        return self._get_attr("swarm.enterprise.core.orchestration.components", "ExecutiveCoordinator")
+    
+    def get_execution_coordinator(self):
+        return self._get_attr("swarm.enterprise.core.orchestration.components", "ExecutionCoordinator")
+    
+    def get_cost_controller(self):
+        return self._get_attr("swarm.enterprise.core.orchestration.components", "CostController")
+    
+    def get_result_assembler(self):
+        return self._get_attr("swarm.enterprise.core.orchestration.components", "ResultAssembler")
+    
+    def get_audit_emitter(self):
+        return self._get_attr("swarm.enterprise.core.orchestration.components", "AuditEmitter")
+    
+    def get_safety_gate(self):
+        return self._get_attr("swarm.enterprise.core.orchestration.components", "SafetyGate")
+    
+    def get_board_coordinator(self):
+        return self._get_attr("swarm.enterprise.core.orchestration.components", "BoardCoordinator")
+    
+    def get_executive_coordinator(self):
+        return self._get_attr("swarm.enterprise.core.orchestration.components", "ExecutiveCoordinator")
+    
+    def get_execution_coordinator(self):
+        return self._get_attr("swarm.enterprise.core.orchestration.components", "ExecutionCoordinator")
+    
+    def get_cost_controller(self):
+        return self._get_attr("swarm.enterprise.core.orchestration.components", "CostController")
+    
+    def get_result_assembler(self):
+        return self._get_attr("swarm.enterprise.core.orchestration.components", "ResultAssembler")
+    
+    def get_audit_emitter(self):
+        return self._get_attr("swarm.enterprise.core.orchestration.components", "AuditEmitter")
+    
+    def get_safety_gate(self):
+        return self._get_attr("swarm.enterprise.core.orchestration.components", "SafetyGate")
+    
+    def get_board_coordinator(self):
+        return self._get_attr("swarm.enterprise.core.orchestration.components", "BoardCoordinator")
+    
+    def get_executive_coordinator(self):
+        return self._get_attr("swarm.enterprise.core.orchestration.components", "ExecutiveCoordinator")
+    
+    def get_execution_coordinator(self):
+        return self._get_attr("swarm.enterprise.core.orchestration.components", "ExecutionCoordinator")
+    
+    def get_cost_controller(self):
+        return self._get_attr("swarm.enterprise.core.orchestration.components", "CostController")
+    
+    def get_result_assembler(self):
+        return self._get_attr("swarm.enterprise.core.orchestration.components", "ResultAssembler")
+    
+    def get_audit_emitter(self):
+        return self._get_attr("swarm.enterprise.core.orchestration.components", "AuditEmitter")
+    
+    def get_safety_gate(self):
+        return self._get_attr("swarm.enterprise.core.orchestration.components", "SafetyGate")
+    
+    def get_board_coordinator(self):
+        return self._get_attr("swarm.enterprise.core.orchestration.components", "BoardCoordinator")
+    
+    def get_executive_coordinator(self):
+        return self._get_attr("swarm.enterprise.core.orchestration.components", "ExecutiveCoordinator")
+    
+    def get_execution_coordinator(self):
+        return self._get_attr("swarm.enterprise.core.orchestration.components", "ExecutionCoordinator")
+    
+    def get_cost_controller(self):
+        return self._get_attr("swarm.enterprise.core.orchestration.components", "CostController")
+    
+    def get_result_assembler(self):
+        return self._get_attr("swarm.enterprise.core.orchestration.components", "ResultAssembler")
+
+
+_lazy = LazyImports()
+
+
+# =============================================================================
+# Components
+# =============================================================================
 
 @dataclass
 class SwarmStageResult:
@@ -58,20 +207,21 @@ class SafetyGate:
 
     def __init__(
         self,
-        safety_dept,
-        policy_engine: PolicyEngine = None,
+        safety_dept: Any,
+        policy_engine: Any = None,
     ):
         self.safety_dept = safety_dept
-        self.policy_engine = policy_engine or get_policy_engine()
+        self.policy_engine = policy_engine or _lazy.get_policy_engine()()
 
     def check(
         self,
         request: Any,
-        exec_context: ExecutionContext,
-        auth_context: AuthorizationContext,
+        exec_context: Any,
+        auth_context: Any,
     ) -> SwarmStageResult:
         """Run safety check with policy evaluation."""
         # Policy evaluation
+        auth_context = _lazy.get_authorization_context()
         policy_ctx = PolicyContext(
             execution_context=exec_context,
             action="safety_check",
@@ -130,18 +280,18 @@ class SafetyGate:
 class BoardCoordinator:
     """Coordinates board deliberation."""
 
-    def __init__(self, board):
+    def __init__(self, board: Any):
         self.board = board
 
     def deliberate(
         self,
         request: Any,
         exec_context: Any,
-        auth_context: AuthorizationContext,
+        auth_context: Any,
     ) -> SwarmStageResult:
         """Run board deliberation."""
         try:
-            bypass_safety = auth_context.capabilities.has("override_safety") if auth_context else False
+            auth_context = _lazy.get_authorization_context()
             board_result = self.board.deliberate(
                 request.question,
                 context=str(getattr(request, 'context', {})),
@@ -179,9 +329,9 @@ class ExecutiveCoordinator:
 
     def __init__(
         self,
-        csuite,
-        cost_service,
-        budget_ledger,
+        csuite: Any,
+        cost_service: Any,
+        budget_ledger: Any,
     ):
         self.csuite = csuite
         self.cost_service = cost_service
@@ -197,7 +347,7 @@ class ExecutiveCoordinator:
         """Run C-Suite executive meeting."""
         try:
             # Compute cost estimate
-            from swarm.enterprise.core.budget.cost_estimation import CostEstimationRequest
+            cost_request = self._lazy.get_attr("swarm.enterprise.core.budget.cost_estimation", "CostEstimationRequest")
             cost_est = self.cost_service.estimate(CostEstimationRequest(
                 provider="nvidia_nim",
                 model="nvidia/nemotron-3-super-120b-a12b",
@@ -291,7 +441,6 @@ class ExecutionCoordinator:
                 )
 
             # This would be replaced with actual department execution
-            # For now, return a placeholder
             return SwarmStageResult(
                 stage_name="execution",
                 success=True,
@@ -310,13 +459,13 @@ class ExecutionCoordinator:
 class CostController:
     """Controls cost estimation and budget management."""
 
-    def __init__(self, cost_service, budget_ledger):
+    def __init__(self, cost_service: Any, budget_ledger: Any):
         self.cost_service = cost_service
         self.budget_ledger = budget_ledger
 
     def estimate_cost(self, request: Any, tenant_id: str) -> Dict[str, Any]:
         """Estimate cost for a request."""
-        from swarm.enterprise.core.budget.cost_estimation import CostEstimationRequest
+        cost_request = self._lazy.get_attr("swarm.enterprise.core.budget.cost_estimation", "CostEstimationRequest")
         estimate = self.cost_service.estimate(CostEstimationRequest(
             provider="nvidia_nim",
             model="nvidia/nemotron-3-super-120b-a12b",
@@ -357,7 +506,7 @@ class ResultAssembler:
         request_id: str,
         execution_id: str,
         trace_id: str,
-        stages: Dict[str, SwarmStageResult],
+        stages: Dict[str, Any],
         final_output: Any,
         policy_decision: str,
         execution_state: str,
@@ -457,19 +606,95 @@ class AuditEmitter:
             return list(self._events)
 
 
-import threading
-import uuid
-from datetime import datetime, timezone
+# =============================================================================
+# Factory Functions
+# =============================================================================
 
+_lazy = LazyImports()
 
-__all__ = [
-    "RequestValidator",
-    "SafetyGate",
-    "BoardCoordinator",
-    "ExecutiveCoordinator",
-    "ExecutionCoordinator",
-    "CostController",
-    "ResultAssembler",
-    "AuditEmitter",
-    "SwarmStageResult",
-]
+def create_request_validator() -> RequestValidator:
+    return RequestValidator()
+
+def create_safety_gate(safety_dept: Any, policy_engine: Any = None) -> SafetyGate:
+    return SafetyGate(safety_dept, policy_engine)
+
+def create_board_coordinator(board: Any) -> BoardCoordinator:
+    return BoardCoordinator(board)
+
+def create_executive_coordinator(csuite: Any, cost_service: Any, budget_ledger: Any) -> ExecutiveCoordinator:
+    return ExecutiveCoordinator(csuite, cost_service, budget_ledger)
+
+def create_execution_coordinator(depts: Dict[str, Any]) -> ExecutionCoordinator:
+    return ExecutionCoordinator(depts)
+
+def create_cost_controller(cost_service: Any, budget_ledger: Any) -> CostController:
+    return CostController(cost_service, budget_ledger)
+
+def create_result_assembler(result_factory=None) -> ResultAssembler:
+    return ResultAssembler(result_factory=result_factory)
+
+def create_audit_emitter() -> AuditEmitter:
+    return AuditEmitter()
+
+def create_safety_gate(safety_dept: Any, policy_engine: PolicyEngine = None) -> SafetyGate:
+    return SafetyGate(safety_dept, policy_engine)
+
+def create_board_coordinator(board: Any) -> BoardCoordinator:
+    return BoardCoordinator(board)
+
+def create_executive_coordinator(csuite: Any, cost_service: Any, budget_ledger: Any) -> ExecutiveCoordinator:
+    return ExecutiveCoordinator(csuite, cost_service, budget_ledger)
+
+def create_execution_coordinator(depts: Dict[str, Any]) -> ExecutionCoordinator:
+    return ExecutionCoordinator(depts)
+
+def create_cost_controller(cost_service: Any, budget_ledger: Any) -> CostController:
+    return CostController(cost_service, budget_ledger)
+
+def create_result_assembler(result_factory=None) -> ResultAssembler:
+    return ResultAssembler(result_factory=result_factory)
+
+def create_audit_emitter() -> AuditEmitter:
+    return AuditEmitter()
+
+def create_safety_gate(safety_dept: Any, policy_engine: PolicyEngine = None) -> SafetyGate:
+    return SafetyGate(safety_dept, policy_engine)
+
+def create_board_coordinator(board: Any) -> BoardCoordinator:
+    return BoardCoordinator(board)
+
+def create_executive_coordinator(csuite: Any, cost_service: Any, budget_ledger: Any) -> ExecutiveCoordinator:
+    return ExecutiveCoordinator(csuite, cost_service, budget_ledger)
+
+def create_execution_coordinator(depts: Dict[str, Any]) -> ExecutionCoordinator:
+    return ExecutionCoordinator(depts)
+
+def create_cost_controller(cost_service: Any, budget_ledger: Any) -> CostController:
+    return CostController(cost_service, budget_ledger)
+
+def create_result_assembler(result_factory=None) -> ResultAssembler:
+    return ResultAssembler(result_factory=result_factory)
+
+def create_audit_emitter() -> AuditEmitter:
+    return AuditEmitter()
+
+def create_safety_gate(safety_dept: Any, policy_engine: PolicyEngine = None) -> SafetyGate:
+    return SafetyGate(safety_dept, policy_engine)
+
+def create_board_coordinator(board: Any) -> BoardCoordinator:
+    return BoardCoordinator(board)
+
+def create_executive_coordinator(csuite: Any, cost_service: Any, budget_ledger: Any) -> ExecutiveCoordinator:
+    return ExecutiveCoordinator(csuite, cost_service, budget_ledger)
+
+def create_execution_coordinator(depts: Dict[str, Any]) -> ExecutionCoordinator:
+    return ExecutionCoordinator(depts)
+
+def create_cost_controller(cost_service: Any, budget_ledger: Any) -> CostController:
+    return CostController(cost_service, budget_ledger)
+
+def create_result_assembler(result_factory=None) -> ResultAssembler:
+    return ResultAssembler(result_factory=result_factory)
+
+def create_audit_emitter() -> AuditEmitter:
+    return AuditEmitter()

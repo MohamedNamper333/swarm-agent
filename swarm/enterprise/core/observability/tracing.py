@@ -1,349 +1,681 @@
 """
-Enterprise Observability — F-023: Weak Observability fix.
-
-Distributed tracing, metrics, structured logging across all stages.
+Distributed Tracing - OpenTelemetry integration for Swarm.
 """
-from dataclasses import dataclass, field
-from typing import Dict, Any, Optional, List, Callable
-from enum import Enum
-from datetime import datetime, timezone
-from contextlib import contextmanager
-import uuid
+
 import threading
 import time
+import uuid
+from abc import ABC, abstractmethod
+from dataclasses import dataclass, field
+from datetime import datetime, timezone
+from enum import Enum
+from typing import Any, Dict, List, Optional, Callable
+from contextlib import contextmanager
 import logging
-from collections import defaultdict
 
 logger = logging.getLogger(__name__)
 
 
-class TraceEventType(str, Enum):
-    """Types of trace events."""
-    SPAN_START = "span_start"
-    SPAN_END = "span_end"
-    SPAN_ERROR = "span_error"
-    EVENT = "event"
+def now_utc() -> datetime:
+    return datetime.now(timezone.utc)
+
+
+def uuidv7() -> str:
+    return str(uuid.uuid4())
+
+
+# =============================================================================
+# Span Models
+# =============================================================================
+
+class SpanKind(str, Enum):
+    INTERNAL = "internal"
+    SERVER = "server"
+    CLIENT = "client"
+    PRODUCER = "producer"
+    CONSUMER = "consumer"
+
+
+class SpanStatus(str, Enum):
+    UNSET = "unset"
+    OK = "ok"
+    ERROR = "error"
+
+
+@dataclass
+class SpanEvent:
+    name: str
+    timestamp: datetime
+    attributes: Dict[str, Any] = field(default_factory=dict)
+
+
+@dataclass
+class SpanLink:
+    trace_id: str
+    span_id: str
+    attributes: Dict[str, Any] = field(default_factory=dict)
 
 
 @dataclass
 class Span:
-    """A trace span."""
-    span_id: str
+    """A single span in a trace."""
     trace_id: str
+    span_id: str
     parent_span_id: Optional[str]
-    operation_name: str
-    service_name: str
-    start_time: datetime
+    name: str
+    kind: SpanKind = SpanKind.INTERNAL
+    start_time: datetime = field(default_factory=lambda: datetime.now(timezone.utc))
     end_time: Optional[datetime] = None
-    tags: Dict[str, Any] = field(default_factory=dict)
-    logs: List[Dict[str, Any]] = field(default_factory=list)
-    status: str = "ok"  # ok, error
-
-    def duration_ms(self) -> Optional[int]:
+    status: SpanStatus = SpanStatus.UNSET
+    attributes: Dict[str, Any] = field(default_factory=dict)
+    events: List[SpanEvent] = field(default_factory=list)
+    links: List[SpanLink] = field(default_factory=list)
+    resource_attributes: Dict[str, Any] = field(default_factory=dict)
+    
+    @property
+    def duration_ms(self) -> Optional[float]:
         if self.end_time:
-            return int((self.end_time - self.start_time).total_seconds() * 1000)
+            return (self.end_time - self.start_time).total_seconds() * 1000
         return None
-
+    
+    def is_finished(self) -> bool:
+        return self.end_time is not None
+    
     def to_dict(self) -> Dict[str, Any]:
         return {
-            "span_id": self.span_id,
             "trace_id": self.trace_id,
+            "span_id": self.span_id,
             "parent_span_id": self.parent_span_id,
-            "operation_name": self.operation_name,
-            "service_name": self.service_name,
+            "name": self.name,
+            "kind": self.kind.value,
             "start_time": self.start_time.isoformat(),
             "end_time": self.end_time.isoformat() if self.end_time else None,
-            "duration_ms": self.duration_ms(),
-            "tags": self.tags,
-            "logs": self.logs,
-            "status": self.status,
+            "duration_ms": self.duration_ms,
+            "status": self.status.value,
+            "attributes": self.attributes,
+            "events": [
+                {
+                    "name": e.name,
+                    "timestamp": e.timestamp.isoformat(),
+                    "attributes": e.attributes,
+                }
+                for e in self.events
+            ],
         }
 
 
-@dataclass
-class TraceContext:
-    """Current trace context."""
-    trace_id: str
-    span_id: str
-    parent_span_id: Optional[str] = None
-    baggage: Dict[str, str] = field(default_factory=dict)
+# =============================================================================
+# Span Context
+# =============================================================================
 
-
-class Tracer:
-    """Distributed tracer."""
-
-    def __init__(self, service_name: str = "swarm"):
-        self.service_name = service_name
-        self._spans: Dict[str, Span] = {}
-        self._traces: Dict[str, List[Span]] = defaultdict(list)
-        self._lock = threading.RLock()
-        self._sampling_rate = 1.0
-
-    def start_span(
+class SpanContext:
+    """Context for a trace."""
+    
+    def __init__(
         self,
-        operation_name: str,
-        parent_span_id: Optional[str] = None,
-        trace_id: Optional[str] = None,
-        tags: Dict[str, Any] = None,
-    ) -> Span:
-        """Start a new span."""
-        trace_id = trace_id or str(uuid.uuid4())
-        span_id = str(uuid.uuid4())
-
-        span = Span(
-            span_id=span_id,
+        trace_id: str,
+        span_id: str,
+        trace_flags: int = 1,  # 1 = sampled
+        trace_state: Optional[str] = None,
+    ):
+        self.trace_id = trace_id
+        self.span_id = span_id
+        self.trace_flags = trace_flags
+        self.trace_state = trace_state
+    
+    @property
+    def is_sampled(self) -> bool:
+        return (self.trace_flags & 1) != 0
+    
+    def to_headers(self) -> Dict[str, str]:
+        """Convert to W3C traceparent headers."""
+        return {
+            "traceparent": f"00-{self.trace_id}-{self.span_id}-{self.trace_flags:02x}",
+            "tracestate": self.trace_state or "",
+        }
+    
+    @classmethod
+    def from_headers(cls, headers: Dict[str, str]) -> Optional["SpanContext"]:
+        """Extract from W3C traceparent headers."""
+        traceparent = headers.get("traceparent") or headers.get("Traceparent")
+        if not traceparent:
+            return None
+        
+        parts = traceparent.split("-")
+        if len(parts) != 4:
+            return None
+        
+        version, trace_id, span_id, flags = parts
+        if version != "00":
+            return None
+        
+        return cls(
             trace_id=trace_id,
-            parent_span_id=parent_span_id,
-            operation_name=operation_name,
-            service_name=self.service_name,
-            start_time=datetime.now(timezone.utc),
-            tags=tags or {},
+            span_id=span_id,
+            trace_flags=int(flags, 16),
         )
 
-        with self._lock:
-            self._spans[span_id] = span
-            self._traces[trace_id].append(span)
 
-        return span
+# =============================================================================
+# Tracer Interface
+# =============================================================================
 
-    def end_span(self, span: Span, status: str = "ok", error: Optional[Exception] = None) -> None:
+class Tracer(ABC):
+    """Abstract tracer interface."""
+    
+    @abstractmethod
+    def start_span(
+        self,
+        name: str,
+        kind: SpanKind = SpanKind.INTERNAL,
+        parent_context: Optional[SpanContext] = None,
+        attributes: Optional[Dict[str, Any]] = None,
+        links: Optional[List[SpanLink]] = None,
+    ) -> "Span":
+        """Start a new span."""
+        pass
+    
+    @abstractmethod
+    def end_span(self, span: Span, status: SpanStatus = SpanStatus.OK) -> None:
         """End a span."""
-        span.end_time = datetime.now(timezone.utc)
-        span.status = status
-        if error:
-            span.logs.append({
-                "timestamp": datetime.now(timezone.utc).isoformat(),
-                "level": "error",
-                "message": str(error),
-                "error_type": type(error).__name__,
-            })
-            span.tags["error"] = True
+        pass
+    
+    @abstractmethod
+    def get_current_span(self) -> Optional[Span]:
+        """Get currently active span."""
+        pass
+    
+    @abstractmethod
+    def set_current_span(self, span: Optional[Span]) -> None:
+        """Set current span."""
+        pass
 
-    def add_log(self, span_id: str, message: str, level: str = "info", fields: Dict[str, Any] = None) -> None:
-        """Add log to span."""
+
+# =============================================================================
+# In-Memory Tracer
+# =============================================================================
+
+class InMemoryTracer(Tracer):
+    """In-memory tracer for development/testing."""
+    
+    def __init__(self, service_name: str = "swarm"):
+        self.service_name = service_name
+        self._spans: List[Span] = []
+        self._current_span: Optional[Span] = None
+        self._lock = threading.RLock()
+        
+        # Span processor callbacks
+        self._span_processors: List[Callable[[Span], None]] = []
+    
+    def add_span_processor(self, processor: Callable[[Span], None]) -> None:
+        """Add a span processor callback."""
+        self._span_processors.append(processor)
+    
+    def start_span(
+        self,
+        name: str,
+        kind: SpanKind = SpanKind.INTERNAL,
+        parent_context: Optional[SpanContext] = None,
+        attributes: Optional[Dict[str, Any]] = None,
+        links: Optional[List[SpanLink]] = None,
+    ) -> Span:
+        """Start a new span."""
         with self._lock:
-            span = self._spans.get(span_id)
-            if span:
-                span.logs.append({
-                    "timestamp": datetime.now(timezone.utc).isoformat(),
-                    "level": level,
-                    "message": message,
-                    "fields": fields or {},
-                })
-
-    def add_tag(self, span_id: str, key: str, value: Any) -> None:
-        """Add tag to span."""
+            trace_id = parent_context.trace_id if parent_context else uuidv7()
+            span_id = uuidv7()[:16]
+            parent_span_id = parent_context.span_id if parent_context else None
+            
+            span = Span(
+                trace_id=trace_id,
+                span_id=span_id,
+                parent_span_id=parent_span_id,
+                name=name,
+                kind=kind,
+                attributes=attributes or {},
+                links=links or [],
+            )
+            
+            # Add service name
+            span.resource_attributes["service.name"] = self.service_name
+            
+            self._current_span = span
+            return span
+    
+    def end_span(self, span: Span, status: SpanStatus = SpanStatus.OK) -> None:
+        """End a span."""
         with self._lock:
-            span = self._spans.get(span_id)
-            if span:
-                span.tags[key] = value
-
+            span.end_time = now_utc()
+            span.status = status
+            
+            self._spans.append(span)
+            
+            # Process through callbacks
+            for processor in self._span_processors:
+                try:
+                    processor(span)
+                except Exception as e:
+                    logger.error(f"Span processor error: {e}")
+            
+            # Clear current if this was the current span
+            if self._current_span and self._current_span.span_id == span.span_id:
+                self._current_span = None
+    
+    def get_current_span(self) -> Optional[Span]:
+        with self._lock:
+            return self._current_span
+    
+    def set_current_span(self, span: Optional[Span]) -> None:
+        with self._lock:
+            self._current_span = span
+    
+    def get_spans(
+        self,
+        trace_id: Optional[str] = None,
+        start_time: Optional[datetime] = None,
+        end_time: Optional[datetime] = None,
+    ) -> List[Span]:
+        """Get spans with optional filters."""
+        with self._lock:
+            spans = self._spans
+            
+            if trace_id:
+                spans = [s for s in spans if s.trace_id == trace_id]
+            if start_time:
+                spans = [s for s in spans if s.start_time >= start_time]
+            if end_time:
+                spans = [s for s in spans if s.end_time and s.end_time <= end_time]
+            
+            return spans
+    
     def get_trace(self, trace_id: str) -> List[Span]:
         """Get all spans for a trace."""
+        return self.get_spans(trace_id=trace_id)
+    
+    def export_spans(self) -> List[Dict[str, Any]]:
+        """Export all spans as dictionaries."""
         with self._lock:
-            return list(self._traces.get(trace_id, []))
+            return [s.to_dict() for s in self._spans]
 
-    def get_span(self, span_id: str) -> Optional[Span]:
-        with self._lock:
-            return self._spans.get(span_id)
 
+# =============================================================================
+# OpenTelemetry Tracer (Wrapper)
+# =============================================================================
+
+class OTELTracer(Tracer):
+    """OpenTelemetry tracer wrapper."""
+    
+    def __init__(
+        self,
+        service_name: str = "swarm",
+        endpoint: Optional[str] = None,
+        insecure: bool = True,
+    ):
+        self.service_name = service_name
+        self.endpoint = endpoint
+        self._tracer = None
+        self._provider = None
+        self._initialized = False
+        
+        if endpoint:
+            self._init_otel()
+    
+    def _init_otel(self) -> None:
+        """Initialize OpenTelemetry SDK."""
+        try:
+            from opentelemetry import trace
+            from opentelemetry.sdk.trace import TracerProvider
+            from opentelemetry.sdk.trace.export import BatchSpanProcessor
+            from opentelemetry.sdk.resources import Resource
+            from opentelemetry.exporter.otlp.proto.grpc.trace_exporter import OTLPSpanExporter
+            
+            resource = Resource.create({"service.name": self.service_name})
+            provider = TracerProvider(resource=resource)
+            
+            if self.endpoint:
+                exporter = OTLPSpanExporter(
+                    endpoint=self.endpoint,
+                    insecure=self.endpoint.startswith("http://") if self.endpoint else True,
+                )
+                provider.add_span_processor(BatchSpanProcessor(exporter))
+            
+            trace.set_tracer_provider(provider)
+            self._tracer = trace.get_tracer(self.service_name)
+            self._provider = provider
+            self._initialized = True
+            
+            logger.info(f"OpenTelemetry tracer initialized for {self.service_name}")
+        except ImportError:
+            logger.warning("OpenTelemetry not installed, falling back to in-memory tracer")
+            self._initialized = False
+    
+    def start_span(
+        self,
+        name: str,
+        kind: SpanKind = SpanKind.INTERNAL,
+        parent_context: Optional[SpanContext] = None,
+        attributes: Optional[Dict[str, Any]] = None,
+        links: Optional[List[SpanLink]] = None,
+    ) -> Span:
+        if self._initialized and self._tracer:
+            # Use OpenTelemetry
+            from opentelemetry.trace import SpanKind as OtelSpanKind
+            from opentelemetry.trace import Link
+            
+            otel_kind = {
+                SpanKind.INTERNAL: OtelSpanKind.INTERNAL,
+                SpanKind.SERVER: OtelSpanKind.SERVER,
+                SpanKind.CLIENT: OtelSpanKind.CLIENT,
+                SpanKind.PRODUCER: OtelSpanKind.PRODUCER,
+                SpanKind.CONSUMER: OtelSpanKind.CONSUMER,
+            }.get(kind, OtelSpanKind.INTERNAL)
+            
+            otel_links = []
+            if links:
+                for link in links:
+                    otel_links.append(Link(
+                        context=trace.SpanContext(
+                            trace_id=int(link.trace_id, 16),
+                            span_id=int(link.span_id, 16),
+                        ),
+                        attributes=link.attributes,
+                    ))
+            
+            otel_span = self._tracer.start_span(
+                name=name,
+                kind=otel_kind,
+                attributes=attributes,
+                links=otel_links,
+            )
+            
+            # Wrap in our Span model
+            span = Span(
+                trace_id=format(otel_span.context.trace_id, "032x"),
+                span_id=format(otel_span.context.span_id, "016x"),
+                parent_span_id=None,  # Would need parent context
+                name=name,
+                kind=kind,
+                attributes=attributes or {},
+            )
+            return span
+        
+        # Fallback to in-memory
+        return InMemoryTracer().start_span(name, kind, parent_context, attributes, links)
+    
+    def end_span(self, span: Span, status: SpanStatus = SpanStatus.OK) -> None:
+        # Handled by OpenTelemetry internally
+        pass
+    
+    def get_current_span(self) -> Optional[Span]:
+        if self._initialized:
+            from opentelemetry import trace
+            span = trace.get_current_span()
+            if span and span.get_span_context().is_valid:
+                return Span(
+                    trace_id=format(span.get_span_context().trace_id, "032x"),
+                    span_id=format(span.get_span_context().span_id, "016x"),
+                    parent_span_id=None,
+                    name=span.name,
+                )
+        return None
+    
+    def set_current_span(self, span: Optional[Span]) -> None:
+        pass
+    
+    def shutdown(self) -> None:
+        if self._provider:
+            self._provider.shutdown()
+
+
+# =============================================================================
+# Tracing Context Management
+# =============================================================================
+
+class TracingContext:
+    """Thread-local tracing context."""
+    
+    def __init__(self, tracer: Tracer):
+        self.tracer = tracer
+        self._local = threading.local()
+    
+    @property
+    def current_span(self) -> Optional[Span]:
+        return getattr(self._local, "span", None)
+    
+    @current_span.setter
+    def current_span(self, span: Optional[Span]) -> None:
+        self._local.span = span
+    
     @contextmanager
-    def trace(self, operation_name: str, **tags):
-        """Context manager for tracing."""
-        span = self.start_span(operation_name, tags=tags)
+    def span(
+        self,
+        name: str,
+        kind: SpanKind = SpanKind.INTERNAL,
+        attributes: Optional[Dict[str, Any]] = None,
+    ):
+        """Context manager for creating spans."""
+        parent = self.current_span
+        parent_context = None
+        if parent:
+            parent_context = SpanContext(
+                trace_id=parent.trace_id,
+                span_id=parent.span_id,
+            )
+        
+        span = self.tracer.start_span(
+            name=name,
+            parent_context=parent_context,
+            attributes=attributes,
+        )
+        
+        self.current_span = span
+        
         try:
             yield span
-            self.end_span(span, "ok")
+            self.tracer.end_span(span, SpanStatus.OK)
         except Exception as e:
-            self.end_span(span, "error", e)
+            span.attributes["error"] = str(e)
+            span.attributes["error.type"] = type(e).__name__
+            self.tracer.end_span(span, SpanStatus.ERROR)
             raise
+        finally:
+            self.current_span = parent
+    
+    def get_trace_headers(self) -> Dict[str, str]:
+        """Get trace headers for propagation."""
+        span = self.current_span
+        if span:
+            ctx = SpanContext(
+                trace_id=span.trace_id,
+                span_id=span.span_id,
+            )
+            return ctx.to_headers()
+        return {}
+    
+    def inject_context(self, carrier: Dict[str, str]) -> None:
+        """Inject trace context into carrier."""
+        headers = self.get_trace_headers()
+        carrier.update(headers)
+    
+    def extract_context(self, carrier: Dict[str, str]) -> Optional[SpanContext]:
+        """Extract trace context from carrier."""
+        return SpanContext.from_headers(carrier)
 
 
-class MetricsCollector:
-    """Metrics collection with p50/p95/p99, counters, gauges."""
+# =============================================================================
+# Standard Attributes (Semantic Conventions)
+# =============================================================================
 
-    def __init__(self):
-        self._counters: Dict[str, int] = defaultdict(int)
-        self._gauges: Dict[str, float] = {}
-        self._histograms: Dict[str, List[float]] = defaultdict(list)
-        self._lock = threading.RLock()
-
-    def increment(self, name: str, value: int = 1, labels: Dict[str, str] = None) -> None:
-        """Increment counter."""
-        key = self._make_key(name, labels)
-        with self._lock:
-            self._counters[key] += value
-
-    def gauge(self, name: str, value: float, labels: Dict[str, str] = None) -> None:
-        """Set gauge value."""
-        key = self._make_key(name, labels)
-        with self._lock:
-            self._gauges[key] = value
-
-    def histogram(self, name: str, value: float, labels: Dict[str, str] = None) -> None:
-        """Record histogram value."""
-        key = self._make_key(name, labels)
-        with self._lock:
-            self._histograms[key].append(value)
-
-    def timing(self, name: str, duration_ms: float, labels: Dict[str, str] = None) -> None:
-        """Record timing (histogram)."""
-        self.histogram(name, duration_ms, labels)
-
-    def _make_key(self, name: str, labels: Dict[str, str] = None) -> str:
-        if not labels:
-            return name
-        label_str = ",".join(f"{k}={v}" for k, v in sorted(labels.items()))
-        return f"{name}{{{label_str}}}"
-
-    def get_counters(self) -> Dict[str, int]:
-        with self._lock:
-            return dict(self._counters)
-
-    def get_gauges(self) -> Dict[str, float]:
-        with self._lock:
-            return dict(self._gauges)
-
-    def get_histograms(self) -> Dict[str, Dict[str, float]]:
-        """Get histogram stats: count, sum, min, max, p50, p95, p99."""
-        with self._lock:
-            result = {}
-            for key, values in self._histograms.items():
-                if not values:
-                    continue
-                sorted_vals = sorted(values)
-                n = len(sorted_vals)
-                result[key] = {
-                    "count": n,
-                    "sum": sum(sorted_vals),
-                    "min": sorted_vals[0],
-                    "max": sorted_vals[-1],
-                    "p50": sorted_vals[n // 2],
-                    "p95": sorted_vals[int(n * 0.95)],
-                    "p99": sorted_vals[int(n * 0.99)],
-                }
-            return result
-
-    def export_prometheus(self) -> str:
-        """Export metrics in Prometheus format."""
-        lines = []
-        with self._lock:
-            for key, value in self._counters.items():
-                lines.append(f"{key} {value}")
-            for key, value in self._gauges.items():
-                lines.append(f"{key} {value}")
-            for key, values in self._histograms.items():
-                if values:
-                    n = len(values)
-                    lines.append(f"{key}_count {n}")
-                    lines.append(f"{key}_sum {sum(values)}")
-        return "\n".join(lines)
+class SpanAttributes:
+    """Standard span attribute keys (OpenTelemetry semantic conventions)."""
+    
+    # HTTP
+    HTTP_METHOD = "http.method"
+    HTTP_URL = "http.url"
+    HTTP_STATUS_CODE = "http.status_code"
+    HTTP_ROUTE = "http.route"
+    HTTP_REQUEST_CONTENT_LENGTH = "http.request.content_length"
+    HTTP_RESPONSE_CONTENT_LENGTH = "http.response.content_length"
+    
+    # Database
+    DB_SYSTEM = "db.system"
+    DB_OPERATION = "db.operation"
+    DB_STATEMENT = "db.statement"
+    DB_NAME = "db.name"
+    
+    # Messaging
+    MESSAGING_SYSTEM = "messaging.system"
+    MESSAGING_DESTINATION = "messaging.destination"
+    MESSAGING_OPERATION = "messaging.operation"
+    
+    # RPC/GRPC
+    RPC_SYSTEM = "rpc.system"
+    RPC_SERVICE = "rpc.service"
+    RPC_METHOD = "rpc.method"
+    
+    # Error
+    ERROR_TYPE = "error.type"
+    ERROR_MESSAGE = "error.message"
+    ERROR_STACK = "error.stack"
+    
+    # Code
+    CODE_FUNCTION = "code.function"
+    CODE_FILEPATH = "code.filepath"
+    CODE_LINENO = "code.lineno"
+    
+    # Custom - Swarm specific
+    SWARM_TENANT_ID = "swarm.tenant_id"
+    SWARM_AGENT_ID = "swarm.agent_id"
+    SWARM_WORKFLOW_ID = "swarm.workflow_id"
+    SWARM_JOB_ID = "swarm.job_id"
+    SWARM_CAPABILITY = "swarm.capability"
 
 
-class StructuredLogger:
-    """Structured logging with trace context."""
+def set_span_attributes(span: Span, attributes: Dict[str, Any]) -> None:
+    """Set multiple attributes on a span."""
+    span.attributes.update(attributes)
 
-    def __init__(self, tracer: Tracer = None):
-        self._tracer = tracer
-        self._logger = logging.getLogger("swarm.structured")
 
-    def _get_context(self) -> Dict[str, Any]:
-        """Get current trace context."""
-        context = {}
-        # In real implementation, get from contextvars
-        return context
+def add_span_event(span: Span, name: str, attributes: Optional[Dict[str, Any]] = None) -> None:
+    """Add an event to a span."""
+    event = SpanEvent(
+        name=name,
+        timestamp=now_utc(),
+        attributes=attributes or {},
+    )
+    span.events.append(event)
 
-    def log(
+
+# =============================================================================
+# Tracing Middleware
+# =============================================================================
+
+class TracingMiddleware:
+    """Middleware to automatically trace HTTP requests."""
+    
+    def __init__(self, tracer: Tracer):
+        self.tracer = tracer
+        self.context = TracingContext(tracer)
+    
+    @contextmanager
+    def trace_request(
         self,
-        level: str,
-        message: str,
-        event_type: str = "log",
-        **fields,
-    ) -> None:
-        """Log structured event."""
-        record = {
-            "timestamp": datetime.now(timezone.utc).isoformat(),
-            "level": level,
-            "message": message,
-            "event_type": event_type,
-            **self._get_context(),
-            **fields,
+        method: str,
+        path: str,
+        status_code: int = 200,
+        attributes: Optional[Dict[str, Any]] = None,
+    ):
+        """Context manager to trace HTTP request."""
+        span_attrs = {
+            SpanAttributes.HTTP_METHOD: method,
+            SpanAttributes.HTTP_URL: path,
+            SpanAttributes.HTTP_STATUS_CODE: status_code,
+            SpanAttributes.HTTP_ROUTE: path,
         }
-        # Use standard logger with extra
-        getattr(self._logger, level.lower())(message, extra=record)
+        if attributes:
+            span_attrs.update(attributes)
+        
+        with self.context.span(
+            name=f"{method} {path}",
+            kind=SpanKind.SERVER,
+            attributes=span_attrs,
+        ) as span:
+            try:
+                yield span
+            except Exception as e:
+                span.attributes["error"] = str(e)
+                span.status = SpanStatus.ERROR
+                raise
+    
+    def inject_headers(self) -> Dict[str, str]:
+        """Get trace headers for outgoing requests."""
+        return self.context.get_trace_headers()
+    
+    def extract_context(self, headers: Dict[str, str]) -> Optional[SpanContext]:
+        """Extract trace context from incoming headers."""
+        return self.context.extract_context(headers)
 
 
-# Global instances
-_tracer: Optional[Tracer] = None
-_metrics: Optional[MetricsCollector] = None
-_structured_logger: Optional[StructuredLogger] = None
-_obs_locks = {
-    "tracer": threading.Lock(),
-    "metrics": threading.Lock(),
-    "logger": threading.Lock(),
-}
+# =============================================================================
+# Trace Exporters
+# =============================================================================
+
+class SpanExporter(ABC):
+    """Abstract span exporter."""
+    
+    @abstractmethod
+    def export(self, spans: List[Span]) -> None:
+        """Export spans."""
+        pass
+    
+    @abstractmethod
+    def shutdown(self) -> None:
+        """Shutdown exporter."""
+        pass
 
 
-def get_tracer(service_name: str = "swarm") -> Tracer:
-    global _tracer
-    with _obs_locks["tracer"]:
-        if _tracer is None:
-            _tracer = Tracer(service_name)
-        return _tracer
+class ConsoleSpanExporter(SpanExporter):
+    """Export spans to console."""
+    
+    def export(self, spans: List[Span]) -> None:
+        for span in spans:
+            print(f"Span: {span.name} | {span.trace_id[:8]}...{span.span_id[:8]} | {span.duration_ms:.2f}ms | {span.status.value}")
+    
+    def shutdown(self) -> None:
+        pass
 
 
-def get_metrics() -> MetricsCollector:
-    global _metrics
-    with _obs_locks["metrics"]:
-        if _metrics is None:
-            _metrics = MetricsCollector()
-        return _metrics
+class JsonSpanExporter(SpanExporter):
+    """Export spans as JSON."""
+    
+    def __init__(self, filepath: str):
+        self.filepath = filepath
+        self._file = open(filepath, "a")
+    
+    def export(self, spans: List[Span]) -> None:
+        import json
+        for span in spans:
+            self._file.write(json.dumps(span.to_dict()) + "\n")
+        self._file.flush()
+    
+    def shutdown(self) -> None:
+        self._file.close()
 
 
-def get_structured_logger() -> StructuredLogger:
-    global _structured_logger
-    with _obs_locks["logger"]:
-        if _structured_logger is None:
-            _structured_logger = StructuredLogger(get_tracer())
-        return _structured_logger
+# =============================================================================
+# Factory
+# =============================================================================
+
+def create_tracer(
+    service_name: str = "swarm",
+    backend: str = "memory",
+    endpoint: Optional[str] = None,
+) -> Tracer:
+    """Create a tracer instance."""
+    if backend == "otel" and endpoint:
+        return OTELTracer(service_name, endpoint)
+    return InMemoryTracer(service_name)
 
 
-# Convenience functions
-def trace(operation_name: str, **tags):
-    """Decorator for tracing function calls."""
-    def decorator(func):
-        def wrapper(*args, **kwargs):
-            tracer = get_tracer()
-            with tracer.trace(operation_name, **tags):
-                return func(*args, **kwargs)
-        return wrapper
-    return decorator
-
-
-def count(name: str, value: int = 1, **labels):
-    get_metrics().increment(name, value, labels)
-
-
-def gauge(name: str, value: float, **labels):
-    get_metrics().gauge(name, value, labels)
-
-
-def timing(name: str, duration_ms: float, **labels):
-    get_metrics().histogram(name, duration_ms, labels)
-
-
-__all__ = [
-    "TraceEventType",
-    "Span",
-    "TraceContext",
-    "Tracer",
-    "MetricsCollector",
-    "StructuredLogger",
-    "get_tracer",
-    "get_metrics",
-    "get_structured_logger",
-    "trace",
-    "count",
-    "gauge",
-    "timing",
-]
+def create_tracing_context(tracer: Tracer) -> TracingContext:
+    """Create a tracing context."""
+    return TracingContext(tracer)
