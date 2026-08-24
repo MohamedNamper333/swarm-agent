@@ -138,6 +138,19 @@ class EnterpriseModelRegistry:
             "nvidia/nemotron-3-super-120b-a12b"),
     }
 
+    # Tier 3: DevOps Dept (3 agents) — CI/CD, infrastructure, deployment
+    DEVOPS = {
+        "devops_director": FallbackChain("devops_director",
+            "nvidia/nemotron-3-super-120b-a12b", "nvidia/llama-3.3-nemotron-super-49b-v1.5",
+            "nvidia/nemotron-3-nano-30b-a3b"),
+        "ci_cd_engineer": FallbackChain("ci_cd_engineer",
+            "meta/llama-3.3-70b-instruct", "meta/llama-3.1-70b-instruct",
+            "nvidia/nemotron-3-super-120b-a12b"),
+        "infrastructure_engineer": FallbackChain("infrastructure_engineer",
+            "nvidia/nemotron-3-super-120b-a12b", "openai/gpt-oss-20b",
+            "nvidia/llama-3.3-nemotron-super-49b-v1.5"),
+    }
+
     DESIGN = {
         "design_director": FallbackChain("design_director",
             "moonshotai/kimi-k2.5", "meta/llama-3.2-11b-vision-instruct", "moonshotai/kimi-k2-instruct"),
@@ -147,9 +160,9 @@ class EnterpriseModelRegistry:
         "image_gen_2": FallbackChain("image_gen_2",
             "black-forest-labs/flux.2-klein-4b", "black-forest-labs/flux.1-schnell",
             "black-forest-labs/flux.1-dev", timeout_sec=10),
-        "designer_1": FallbackChain("designer_1",
-            "thinking machines/inkling", "moonshotai/kimi-k2.5", "deepseek-ai/deepseek-v4-flash"),
-        "designer_2": FallbackChain("designer_2",
+        "ui_designer": FallbackChain("ui_designer",
+            "moonshotai/kimi-k2.5", "meta/llama-3.2-11b-vision-instruct", "deepseek-ai/deepseek-v4-flash"),
+        "graphic_designer": FallbackChain("graphic_designer",
             "thinking machines/inkling", "moonshotai/kimi-k2.5", "deepseek-ai/deepseek-v4-flash"),
         "ux_specialist": FallbackChain("ux_specialist",
             "moonshotai/kimi-k2.5", "meta/llama-3.2-11b-vision-instruct", "moonshotai/kimi-k2-instruct"),
@@ -166,10 +179,11 @@ class EnterpriseModelRegistry:
             "nvidia/cosmos-predict1-7b", "stabilityai/stable-video-diffusion", timeout_sec=30),
         "video_gen_2": FallbackChain("video_gen_2",
             "stabilityai/stable-video-diffusion", "nvidia/cosmos-predict1-7b", timeout_sec=30),
-        "animator_1": FallbackChain("animator_1",
+        "animator_2d": FallbackChain("animator_2d",
             "minimaxai/minimax-m3", "moonshotai/kimi-k2.5", "google/gemma-3-27b-it"),
-        "animator_2": FallbackChain("animator_2",
-            "minimaxai/minimax-m3", "moonshotai/kimi-k2.5", "google/gemma-3-27b-it"),
+        "motion_graphics": FallbackChain("motion_graphics",
+            "mistralai/mistral-medium-3.5-128b", "google/gemma-3-27b-it",
+            "nvidia/nemotron-mini-4b-instruct"),
         "motion_designer": FallbackChain("motion_designer",
             "mistralai/mistral-medium-3.5-128b", "google/gemma-3-27b-it", "nvidia/nemotron-mini-4b-instruct"),
     }
@@ -194,6 +208,12 @@ class EnterpriseModelRegistry:
         "data_engineer": FallbackChain("data_engineer",
             "nvidia/nemotron-3-nano-30b-a3b", "nvidia/nemotron-mini-4b-instruct",
             "nvidia/nvidia-nemotron-nano-9b-v2"),
+        "data_scientist": FallbackChain("data_scientist",
+            "nvidia/nemotron-3-super-120b-a12b", "google/gemma-3-27b-it",
+            "nvidia/nemotron-3-nano-30b-a3b"),
+        "database_admin": FallbackChain("database_admin",
+            "qwen/qwen2.5-coder-32b-instruct", "nvidia/nemotron-3-nano-30b-a3b",
+            "nvidia/nemotron-mini-4b-instruct"),
     }
 
     LANGUAGE = {
