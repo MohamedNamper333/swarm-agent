@@ -169,6 +169,8 @@ class CircuitBreaker:
 class RateLimiter:
     """Token bucket rate limiter with per-key limits."""
 
+    MAX_BUCKETS = 50_000  # bound per-client key memory (DoS guard)
+
     def __init__(self, default_rate: int = 1000, default_burst: int = 100):
         self.default_rate = default_rate
         self.default_burst = default_burst
@@ -180,36 +182,41 @@ class RateLimiter:
             rate = rate or self.default_rate
             burst = burst or self.default_burst
 
+            # GW-N2 fix: tokens kept as FLOAT. The old int() truncation of
+            # elapsed*rate discarded sub-token remainders on every call —
+            # under fast polling the bucket refilled by exactly zero forever
+            # (systematic starvation at low rates).
             now = time.time()
             bucket = self._buckets.get(key)
 
             if not bucket:
+                if len(self._buckets) >= self.MAX_BUCKETS:
+                    victims = sorted(self._buckets.items(),
+                                     key=lambda kv: kv[1]["last_refill"])[:1024]
+                    for vk, _ in victims:
+                        del self._buckets[vk]
+                # Creation CONSUMES one token: previously returned True
+                # without spending -> burst granted one free extra request.
                 self._buckets[key] = {
-                    "tokens": burst * 1000,  # Use integer tokens (millitokens)
-                    "last_refill": time.time(),
-                    "rate": rate * 1000,  # millitokens per second
-                    "burst": burst * 1000,
+                    "tokens": float(max(0, burst - 1)),
+                    "last_refill": now,
+                    "rate": float(rate),
+                    "burst": float(burst),
                 }
-                return True
+                return burst >= 1
 
             bucket = self._buckets[key]
-            elapsed = time.time() - bucket["last_refill"]
-            # Refill tokens (rate is in tokens per second, we use millitokens)
-            bucket["tokens"] = min(bucket["burst"], bucket["tokens"] + int(elapsed * bucket["rate"]))
-            bucket["last_refill"] = time.time()
+            elapsed = max(0.0, now - bucket["last_refill"])
+            bucket["tokens"] = min(bucket["burst"], bucket["tokens"] + elapsed * bucket["rate"])
+            bucket["last_refill"] = now
 
-            cost = 1000  # 1000 millitokens = 1 token
-            if bucket["tokens"] >= cost:
-                # If remaining tokens <= cost, consume all remaining (last request)
-                if bucket["tokens"] <= cost:
-                    bucket["tokens"] = 0
-                else:
-                    bucket["tokens"] -= cost
+            if bucket["tokens"] >= 1.0:
+                bucket["tokens"] -= 1.0
                 return True
-
             return False
 
     async def get_remaining(self, key: str) -> int:
+        """Whole tokens remaining (bucket stores fractional internally)."""
         async with self._lock:
             bucket = self._buckets.get(key)
             if not bucket:

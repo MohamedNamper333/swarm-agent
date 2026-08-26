@@ -59,6 +59,7 @@
 | `core/auto_verdict.py` | ✅(جزئي) | 5 bare-except→مسجلة؛ فاحصا Integration/CodeQuality كانا no-op يعيدان الدرجة الكاملة → stub معلن بسقف درجة |
 | `job/compensation.py` | ✅(جزئي) | 6× persistence fire-and-forget: create_task بلا مرجع (GC hazard) + إسقاط صامت بلا loop → `_persist_state()` مركزية بخيوط آمنة وتسجيل؛ read-path تسجيل |
 | نمو غير محدود (أكبر 3) | ✅ | self_reflection 200/agent · tracing queue 10k · metric points 5k |
+| `gateway/server.py` | ✅(جزئي) | CircuitState مكرر أزيل؛ token bucket: float tokens (كان int() يقصّ ويجوّع المنخفض المعدل) + الإنشاء يستهلك توكناً (منحة مجانية) + دلاء مقيدة 50k مع إخلاء خامول |
 | `routing/service.py` | ✅(جزئي) | fallback الازدحام: saturated-but-healthy تُعاد بدل فشل التوجيه الكلي تحت الحمل (مُثبت)؛ دلالات strict-probe للقاطع موثقة؛ الموازنات السبع سليمة |
 | `governance/service.py` | ✅(جزئي) | مقيّم تعبيرات آمن جديد (بدون eval): dotted-paths مع flat-fallback، and/or/not، مقارنات — سياسات الافتراضيات تشتغل فعلياً؛ ظل eval المدمج رفع؛ ALLOW لم يعد يُحسب مخالفة؛ سجل تدقيق مقصود 50k |
 
