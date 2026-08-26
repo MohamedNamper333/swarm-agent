@@ -179,6 +179,8 @@ class Counter:
                 labels=merged_labels,
             )
             metric.points.append(point)
+            if len(metric.points) > 5_000:  # bound per-metric series
+                del metric.points[:-5_000]
     
     def get_value(self, labels: Optional[Dict[str, str]] = None) -> float:
         """Get current counter value."""

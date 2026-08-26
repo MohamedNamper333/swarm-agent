@@ -73,6 +73,8 @@ class BatchSpanProcessor:
                 # Drop oldest if queue full
                 self._queue.pop(0)
             self._queue.append(span)
+            if len(self._queue) > getattr(self, "_queue_max", 10_000):
+                del self._queue[:len(self._queue) - getattr(self, "_queue_max", 10_000)]
             self._condition.notify()
     
     def _worker_loop(self) -> None:

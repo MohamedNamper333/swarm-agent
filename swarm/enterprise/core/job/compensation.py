@@ -127,7 +127,47 @@ class WorkflowExecution:
 class CompensationEngine:
     """Executes workflows with automatic compensation on failure."""
 
+    def _persist_state(self, workflow: "WorkflowExecution") -> None:
+        """Fire-and-forget persistence that NEVER drops writes silently.
+
+        Fixes three audit defects repeated across 5 call sites:
+        - create_task() result was discarded: the task could be GC'd before
+          running (CPython documented hazard) -> save silently never happens.
+        - No-running-loop path swallowed the write with `pass`.
+        - Failures inside the save task were unobserved.
+        """
+        if not self.job_repository:
+            return
+        import asyncio as _aio
+        import threading as _threading
+
+        try:
+            loop = _aio.get_running_loop()
+        except RuntimeError:
+            loop = None
+
+        if loop is not None:
+            task = loop.create_task(self.job_repository.save_workflow(workflow))
+            self._persist_tasks.add(task)
+            task.add_done_callback(self._persist_tasks.discard)
+            def _observe(t):
+                exc = t.exception() if not t.cancelled() else None
+                if exc:
+                    logger.error(f"Workflow persistence failed: {exc}")
+            task.add_done_callback(_observe)
+        else:
+            # Sync context: persist on a worker thread with its own loop.
+            import logging as _lg
+            def _run():
+                try:
+                    _aio.run(self.job_repository.save_workflow(workflow))
+                except Exception as exc:  # pragma: no cover
+                    _lg.getLogger(__name__).error(
+                        f"Workflow persistence (sync ctx) failed: {exc}")
+            _threading.Thread(target=_run, daemon=True, name="wf-persist").start()
+
     def __init__(self, job_repository: Optional[JobRepository] = None):
+        self._persist_tasks: set = set()
         self._workflows: Dict[str, WorkflowExecution] = {}
         self._lock = threading.RLock()
         self.job_repository = job_repository or create_job_repository("memory")
@@ -140,15 +180,7 @@ class CompensationEngine:
             self._workflows[workflow.workflow_id] = workflow
         
         # Persist workflow
-        if self.job_repository:
-            # Fire-and-forget persistence (sync wrapper)
-            import asyncio
-            try:
-                loop = asyncio.get_running_loop()
-                loop.create_task(self.job_repository.save_workflow(workflow))
-            except RuntimeError:
-                # No running loop - run in background thread or skip
-                pass
+        self._persist_state(workflow)
 
     def _topological_sort(self, workflow: WorkflowExecution) -> List[str]:
         """Compute topological order using Kahn's algorithm (iterative).
@@ -201,15 +233,7 @@ class CompensationEngine:
         workflow.started_at = datetime.now(timezone.utc)
         
         # Persist initial running state
-        if self.job_repository:
-            # Fire-and-forget persistence (sync wrapper)
-            import asyncio
-            try:
-                loop = asyncio.get_running_loop()
-                loop.create_task(self.job_repository.save_workflow(workflow))
-            except RuntimeError:
-                # No running loop - run in background thread or skip
-                pass
+        self._persist_state(workflow)
 
         try:
             for step_id in workflow.execution_order:
@@ -254,12 +278,7 @@ class CompensationEngine:
             workflow.completed_at = datetime.now(timezone.utc)
             
             # Persist final state
-            if self.job_repository:
-                try:
-                    loop = asyncio.get_running_loop()
-                    loop.create_task(self.job_repository.save_workflow(workflow))
-                except RuntimeError:
-                    pass
+            self._persist_state(workflow)
             
             return workflow
 
@@ -269,24 +288,14 @@ class CompensationEngine:
             workflow.status = "compensating"
             
             # Persist compensating state
-            if self.job_repository:
-                try:
-                    loop = asyncio.get_running_loop()
-                    loop.create_task(self.job_repository.save_workflow(workflow))
-                except RuntimeError:
-                    pass
+            self._persist_state(workflow)
             
             self._compensate(workflow)
             workflow.status = "failed"
             workflow.completed_at = datetime.now(timezone.utc)
             
             # Persist final failed state
-            if self.job_repository:
-                try:
-                    loop = asyncio.get_running_loop()
-                    loop.create_task(self.job_repository.save_workflow(workflow))
-                except RuntimeError:
-                    pass
+            self._persist_state(workflow)
             
             raise
 
@@ -339,12 +348,7 @@ class CompensationEngine:
                     workflow.status = "requires_manual_approval"
             
             # Persist workflow after compensation phase
-            if self.job_repository:
-                try:
-                    loop = asyncio.get_running_loop()
-                    loop.create_task(self.job_repository.save_workflow(workflow))
-                except RuntimeError:
-                    pass
+            self._persist_state(workflow)
 
     def get_workflow(self, workflow_id: str) -> Optional[WorkflowExecution]:
         with self._lock:
@@ -386,8 +390,9 @@ class CompensationEngine:
                 for w in repo_workflows:
                     if w.workflow_id not in seen:
                         workflows.append(w)
-            except Exception:
-                pass
+            except Exception as e:
+                # Degrade to in-memory view, but never silently.
+                logger.warning(f"list_workflows: repository merge failed: {e}")
         
         return workflows
 

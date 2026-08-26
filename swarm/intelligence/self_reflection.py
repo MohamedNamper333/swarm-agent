@@ -158,7 +158,12 @@ class SelfReflectionEngine:
             if context:
                 entry = self._auto_populate_reflection(entry, context, template)
 
-            self.reflection_history[agent_id].append(entry)
+            hist = self.reflection_history[agent_id]
+            hist.append(entry)
+            # Bound per-agent history (was unbounded -> JSON file grew forever)
+            MAX_PER_AGENT = 200
+            if len(hist) > MAX_PER_AGENT:
+                del hist[:-MAX_PER_AGENT]
             self._save_history()
 
             logger.info(f"Reflection completed for agent {agent_id}, task {task_id}")

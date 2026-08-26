@@ -156,8 +156,8 @@ class FunctionalChecker:
                     if 'raise' not in content and 'except' not in content:
                         score -= 0.05
                         evidence.append(f"No error handling in {file}")
-                except:
-                    pass
+                except OSError as e:
+                    logger.warning(f"Could not read {file}: {e}")
 
         return max(0, score), evidence
 
@@ -168,22 +168,13 @@ class IntegrationChecker:
         evidence = []
         score = 1.0
 
-        # Check for import errors
-        for file in artifacts.get('code_files', []):
-            if file.endswith('.py'):
-                try:
-                    with open(file, 'r') as f:
-                        content = f.read()
-                    # Check for unresolved imports
-                    imports = re.findall(r'^(?:from|import)\s+(\S+)', content, re.MULTILINE)
-                    for imp in imports:
-                        if '.' in imp and not imp.startswith('.'):
-                            # External import - could fail
-                            pass
-                except:
-                    pass
+        # NOTE: real import-resolution requires executing/importing the
+        # artifacts in a sandbox; this check is a documented STUB. It used to
+        # loop over imports doing nothing while returning a perfect score,
+        # silently inflating verdicts.
+        evidence.append("integration check not implemented (stub)")
 
-        return score, evidence
+        return max(0.0, min(score, 0.5)), evidence  # capped: unverified
 
 
 class SecurityChecker:
@@ -238,8 +229,8 @@ class PerformanceChecker:
                     if 'while True:' in content and 'break' not in content:
                         score -= 0.1
                         evidence.append(f"Potential infinite loop in {file}")
-                except:
-                    pass
+                except OSError as e:
+                    logger.warning(f"Could not read {file}: {e}")
 
         return max(0, score), evidence
 
@@ -260,8 +251,8 @@ class DocumentationChecker:
                     if not content.strip().startswith('"""') and not content.strip().startswith("'''"):
                         score -= 0.1
                         evidence.append(f"Missing module docstring in {file}")
-                except:
-                    pass
+                except OSError as e:
+                    logger.warning(f"Could not read {file}: {e}")
 
         # Check for README/docs
         docs = artifacts.get('documentation', [])
@@ -285,12 +276,11 @@ class CodeQualityChecker:
                         content = f.read()
                     # Check for long functions
                     functions = re.findall(r'def\s+\w+\s*\([^)]*\):', content)
-                    for func in functions:
-                        pass  # Would need AST parsing for real check
-                except:
-                    pass
+                    _ = functions  # AST-based depth/duplication analysis TODO
+                except OSError as e:
+                    logger.warning(f"Could not read {file}: {e}")
 
-        return score, evidence
+        return max(0.0, min(score, 0.9)), evidence  # partial confidence
 
 
 class CompatibilityChecker:

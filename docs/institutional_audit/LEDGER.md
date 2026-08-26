@@ -51,7 +51,15 @@
 | `checkpoint_store.py` | ✅(جزئي) | rollback تعويضي مُثبت بحقن عطل؛ TTL يصل عبر schema الإصلاح السابق |
 | `memory/v2/repository.py` (batch) | ✅ | إعادة كتابة BATCH script: flat-schema + تحقق الكل قبل كتابة أي (all-or-nothing) + ترجمة ResponseError الحقيقية بدل dead-code |
 
-## T4 — الدعم
+## T4 — الدعم (مسح مخاطر + إصلاحات أولى)
+
+| الملف | الحالة | ملاحظات |
+|-------|--------|---------|
+| مسح مخاطر ثابت شجري | ✅ | 9 أنماط × كل T4 → قائمة مرتبة؛ إيجابيات كاذبة موثقة (eval/exec داخل SecurityChecker، "SQL" نصوص سجل، secrets.token_urlsafe) |
+| `core/auto_verdict.py` | ✅(جزئي) | 5 bare-except→مسجلة؛ فاحصا Integration/CodeQuality كانا no-op يعيدان الدرجة الكاملة → stub معلن بسقف درجة |
+| `job/compensation.py` | ✅(جزئي) | 6× persistence fire-and-forget: create_task بلا مرجع (GC hazard) + إسقاط صامت بلا loop → `_persist_state()` مركزية بخيوط آمنة وتسجيل؛ read-path تسجيل |
+| نمو غير محدود (أكبر 3) | ✅ | self_reflection 200/agent · tracing queue 10k · metric points 5k |
+
 
 ⬜ routing/service · governance · gateway · servicemesh · artifact/signing+store · observability/* · plugins · skill_discovery · reflections · intelligence · context_manager · constitutional · api/websocket_server · enterprise/departments الباقية (code/design/video/research/data/language/knowledge/csuite — أُنشئت وتعمل عبر master لكن لم تُدقق سطر-سطر)
 
