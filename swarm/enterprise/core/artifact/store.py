@@ -3,6 +3,7 @@ Artifact Store - Artifact storage, versioning, and provenance tracking.
 """
 
 import hashlib
+import io
 import threading
 import time
 import uuid
@@ -168,8 +169,17 @@ class LocalFileStorage(StorageBackend):
         os.makedirs(base_path, exist_ok=True)
     
     def _full_path(self, path: str) -> str:
+        """Traversal-proof path resolution (AR-N1).
+
+        Previously os.path.join(base, "../../x") escaped the artifact root —
+        an arbitrary read/write primitive on the host filesystem.
+        """
         import os
-        return os.path.join(self.base_path, path)
+        base = os.path.realpath(self.base_path)
+        full = os.path.realpath(os.path.join(base, path.lstrip("/")))
+        if full != base and not full.startswith(base + os.sep):
+            raise ValueError(f"Artifact path escapes storage root: {path!r}")
+        return full
     
     def write(self, path: str, data: BinaryIO, metadata: Dict[str, Any]) -> bool:
         import os
@@ -411,10 +421,22 @@ class ArtifactStore:
             if not artifact:
                 return None
             
+            # AR-N4: financial-grade fields (storage_path, hashes, size,
+            # status) are engine-managed — direct mutation defeated the
+            # checksum system entirely.
+            allowed = {"name", "description", "tags", "metadata",
+                       "version", "updated_at"}
             for key, value in updates.items():
-                if hasattr(artifact, key) and key not in ("artifact_id", "created_at", "created_by"):
+                if key in ("artifact_id", "created_at", "created_by"):
+                    continue
+                if key in ("storage_path", "content_hash", "size_bytes",
+                           "status", "checksum_verified"):
+                    raise ValueError(
+                        f"'{key}' is engine-managed; use store_content()/"
+                        f"verify_checksum()")
+                if key in allowed and hasattr(artifact, key):
                     setattr(artifact, key, value)
-            
+
             artifact.updated_at = now_utc()
             return artifact
     
@@ -466,10 +488,16 @@ class ArtifactStore:
             if not artifact:
                 return False
             
-            # Calculate hash if not provided
-            if not content_hash:
-                content_hash = self._calculate_hash(data)
-                data.seek(0)  # Reset stream
+            # ALWAYS compute server-side hash. A caller-supplied hash was
+            # trusted verbatim and `checksum_verified` stamped True without
+            # any verification (AR-N2). Non-seekable streams are buffered
+            # once so hash+write see identical bytes (AR-N3).
+            try:
+                data.seek(0)
+            except (OSError, AttributeError):
+                data = io.BytesIO(data.read())
+            content_hash = self._calculate_hash(data)
+            data.seek(0)
             
             # Generate storage path
             storage_path = f"artifacts/{artifact.artifact_id}/{artifact.version}"
@@ -482,6 +510,25 @@ class ArtifactStore:
             })
             
             if success:
+                # Verify what actually landed on disk before stamping.
+                readback = self.storage.read(storage_path)
+                verified = False
+                if readback is not None:
+                    import hashlib as _hl
+                    h = _hl.sha256()
+                    while True:
+                        chunk = readback.read(1024 * 1024)
+                        if not chunk:
+                            break
+                        h.update(chunk)
+                    verified = h.hexdigest() == content_hash
+                if not verified:
+                    logger.error(
+                        f"Post-write checksum mismatch for {artifact_id}; "
+                        f"removing corrupt stored object")
+                    self.storage.delete(storage_path)
+                    return False
+
                 artifact.content_hash = content_hash
                 artifact.size_bytes = self.storage.get_size(f"artifacts/{artifact.artifact_id}/{artifact.version}") or 0
                 artifact.storage_path = storage_path
