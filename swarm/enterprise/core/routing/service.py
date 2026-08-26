@@ -544,14 +544,35 @@ class ServiceRegistry:
             return True
     
     def get_endpoints(self, service_name: str, healthy_only: bool = True) -> List[ServiceEndpoint]:
-        """Get all endpoints for a service."""
+        """Get endpoints for a service.
+
+        Saturation fallback: `is_available` conflates health with connection
+        headroom. Under full saturation this used to return [] and the router
+        failed the request outright ("No healthy endpoints") even though the
+        endpoints were merely busy. Now: healthy/unhealthy filtering first;
+        if that leaves nothing but SATURATED-but-healthy endpoints exist,
+        return them — the load balancer picks the least loaded.
+        """
         with self._lock:
             endpoints = list(self._services.get(service_name, {}).values())
-            
-            if healthy_only:
-                endpoints = [e for e in endpoints if e.is_available]
-            
-            return endpoints
+
+            if not healthy_only:
+                return endpoints
+
+            available = [e for e in endpoints if e.is_available]
+            if available:
+                return available
+
+            # Last resort: genuinely-healthy-but-saturated
+            saturated = [
+                e for e in endpoints
+                if e.status == ServiceStatus.HEALTHY and not e.circuit_open
+            ]
+            if saturated:
+                logger.warning(
+                    f"All endpoints for '{service_name}' saturated "
+                    f"({len(saturated)}); degrading to least-loaded selection")
+            return saturated
     
     def get_endpoint(self, endpoint_id: str) -> Optional[ServiceEndpoint]:
         """Get a specific endpoint."""
@@ -650,7 +671,10 @@ class ServiceRegistry:
                     logger.error(f"Health check failed for {endpoint.endpoint_id}: {e}")
                     self.update_endpoint_status(endpoint.endpoint_id, ServiceStatus.UNHEALTHY)
             else:
-                # Default: check if circuit breaker should be closed
+                # Default: cooldown expiry closes the circuit. consecutive_failures
+                # is intentionally NOT reset here — one fresh failure re-trips
+                # immediately (strict probe semantics), while five successes via
+                # update_endpoint_status(HEALTHY) fully rehabilitate.
                 if endpoint.circuit_open and endpoint.circuit_open_at:
                     if (now_utc() - endpoint.circuit_open_at).total_seconds() > 60:
                         endpoint.circuit_open = False

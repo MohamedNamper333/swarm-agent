@@ -11,6 +11,7 @@ from datetime import datetime, timezone, timedelta
 from typing import Any, Callable, Dict, List, Optional, Set
 from collections import defaultdict
 import logging
+import re
 
 from .models import (
     Policy, PolicyRule, PolicyType, PolicyScope, PolicyAction, PolicyEvaluation,
@@ -241,7 +242,9 @@ class PolicyEngine:
                 })
                 
                 if matched:
-                    violations.append(f"{rule.name}: {rule.description}")
+                    # G-N4: an ALLOW rule matching is NOT a violation.
+                    if rule.action != PolicyAction.ALLOW:
+                        violations.append(f"{rule.name}: {rule.description}")
                     # Most restrictive action wins
                     if self._action_severity(rule.action) > self._action_severity(final_action):
                         final_action = rule.action
@@ -273,40 +276,178 @@ class PolicyEngine:
         if not condition:
             return False
         
-        # Simple keyword-based matching for demo
-        # In production, use cel-go or similar
-        condition_lower = condition.lower()
-        
-        # Check for budget conditions
-        if "budget" in condition_lower:
-            budget_limit = context.get("budget_limit", float("inf"))
-            cost_estimate = context.get("cost_estimate", 0)
-            if cost_estimate > budget_limit:
+        # Safe mini-expression evaluator (NO eval/exec): supports dotted
+        # paths resolved against context, comparisons (> < >= <= == !=),
+        # boolean and/or/not, numbers and quoted strings. This matches the
+        # grammar of the built-in default policies
+        # (e.g. "not auth.valid", "rate.current > rate.limit",
+        #  "action.sensitivity == 'high' and not approval.granted").
+        try:
+            return bool(self._eval_expression(condition, context))
+        except Exception as e:
+            logger.warning(f"Condition {condition!r} failed to evaluate: {e}")
+            return False
+
+    _TOKEN_RE = re.compile(
+        r"""\s*(?:
+            (?P<op>>=|<=|==|!=|>|<)
+          | (?P<lp>\()
+          | (?P<rp>\))
+          | (?P<str>'[^']*'|"[^"]*")
+          | (?P<num>-?\d+(?:\.\d+)?)
+          | (?P<word>[A-Za-z_][A-Za-z0-9_.]*)
+          | (?P<ws>\s+)
+        )""",
+        re.X,
+    )
+
+    def _tokenize_condition(self, condition: str) -> List[str]:
+        tokens, pos = [], 0
+        while pos < len(condition):
+            m = self._TOKEN_RE.match(condition, pos)
+            if not m:
+                raise ValueError(f"Bad character at {pos}: {condition[pos:pos+5]!r}")
+            pos = m.end()
+            kind = m.lastgroup
+            if kind == "ws":
+                continue
+            tokens.append(m.group(kind))
+        return tokens
+
+    def _resolve_path(self, path: str, context: Dict[str, Any]) -> Any:
+        """Resolve dotted path against nested dicts/attrs, with a flat-key
+        fallback: this engine's contexts use FLAT keys like ``auth_valid``
+        while policy conditions are written dotted (``auth.valid``)."""
+        cur: Any = context
+        parts = path.split(".")
+        for i, part in enumerate(parts):
+            if isinstance(cur, dict):
+                if part in cur:
+                    cur = cur[part]
+                    continue
+            elif hasattr(cur, part):
+                cur = getattr(cur, part)
+                continue
+            # Unresolvable from here: try joining the REMAINING parts with
+            # "_" against the last resolved container (nested->flat bridge).
+            remainder = "_".join(parts[i:])
+            if isinstance(cur, dict) and remainder in cur:
+                return cur[remainder]
+            return context.get(remainder)
+        return cur
+
+    def _eval_condition_tokens(self, tokens: List[str], context: Dict[str, Any]) -> bool:
+        idx = 0
+
+        def peek():
+            return tokens[idx] if idx < len(tokens) else None
+
+        def parse_or() -> bool:
+            nonlocal idx
+            val = parse_and()
+            while peek() == "or":
+                idx += 1
+                rhs = parse_and()
+                val = val or rhs
+            return val
+
+        def parse_and() -> bool:
+            nonlocal idx
+            val = parse_unary()
+            while peek() == "and":
+                idx += 1
+                rhs = parse_unary()
+                val = val and rhs
+            return val
+
+        def parse_unary() -> bool:
+            nonlocal idx
+            if peek() == "not":
+                idx += 1
+                return not parse_unary()
+            if peek() == "(":
+                idx += 1
+                v = parse_or()
+                if peek() != ")":
+                    raise ValueError("missing )")
+                idx += 1
+                return v
+            return parse_comparison()
+
+        def operand_value(tok: str) -> Any:
+            if tok.startswith(("'", '"')):
+                return tok[1:-1]
+            if re.fullmatch(r"-?\d+(\.\d+)?", tok):
+                return float(tok)
+            if tok in ("true", "True"):
                 return True
-        
-        # Check for PII
-        if "pii" in condition_lower or "contains_pii" in condition_lower:
-            return context.get("contains_pii", False)
-        
-        # Check for auth
-        if "auth.valid" in condition_lower:
-            return not context.get("auth_valid", True)
-        
-        # Check for rate limits
-        if "rate.current" in condition_lower and "rate.limit" in condition_lower:
-            current = context.get("rate_current", 0)
-            limit = context.get("rate_limit", float("inf"))
-            return current > limit
-        
-        # Check for sensitive action
-        if "sensitivity" in condition_lower:
-            return context.get("action_sensitivity", "low") == "high"
-        
-        # Check for approval
-        if "approval.granted" in condition_lower:
-            return not context.get("approval_granted", False)
-        
-        return False
+            if tok in ("false", "False"):
+                return False
+            return self._resolve_path(tok, context)
+
+        def truthy(v: Any) -> bool:
+            return v is not None and v is not False and v != 0
+
+        def parse_comparison() -> bool:
+            nonlocal idx
+            tok = peek()
+            if tok is None:
+                raise ValueError("unexpected end of condition")
+
+            # Parenthesised sub-expression as a boolean primary
+            if tok == "(":
+                idx += 1
+                v = parse_or()
+                if peek() != ")":
+                    raise ValueError("missing )")
+                idx += 1
+                return v
+
+            idx += 1
+            lhs = operand_value(tok)
+
+            op = peek()
+            if op in (">", "<", ">=", "<=", "==", "!="):
+                idx += 1
+                rhs_tok = peek()
+                if rhs_tok is None:
+                    raise ValueError("comparison missing right side")
+                idx += 1
+                rhs = operand_value(rhs_tok)
+                if lhs is None or rhs is None:
+                    return False
+                try:
+                    if op == ">":
+                        return lhs > rhs
+                    if op == "<":
+                        return lhs < rhs
+                    if op == ">=":
+                        return lhs >= rhs
+                    if op == "<=":
+                        return lhs <= rhs
+                    if op == "==":
+                        return lhs == rhs
+                    return lhs != rhs
+                except TypeError:
+                    return False
+
+            # Bare identifier/path/boolean literal -> truthiness
+            if tok in ("true", "True"):
+                return True
+            if tok in ("false", "False"):
+                return False
+            return truthy(lhs)
+
+        result = parse_or()
+        if idx != len(tokens):
+            raise ValueError(f"trailing tokens: {tokens[idx:]}")
+        return result
+
+    def _eval_expression(self, condition: str, context: Dict[str, Any]) -> bool:
+        tokens = self._tokenize_condition(condition)
+        if not tokens:
+            return False
+        return self._eval_condition_tokens(tokens, context)
     
     def _action_severity(self, action: PolicyAction) -> int:
         """Get severity order for actions."""
@@ -332,13 +473,13 @@ class PolicyEngine:
         all_violations = []
         policy_names = []
         
-        for eval in evaluations:
-            policy_names.append(eval.policy_name)
-            all_violations.extend(eval.violations)
-            severity = self._action_severity(eval.final_action)
+        for evaluation in evaluations:
+            policy_names.append(evaluation.policy_name)
+            all_violations.extend(evaluation.violations)
+            severity = self._action_severity(evaluation.final_action)
             if severity > max_severity:
                 max_severity = severity
-                final_action = eval.final_action
+                final_action = evaluation.final_action
         
         return {
             "action": final_action.value,
@@ -612,6 +753,12 @@ class AuditLogger:
             self._last_hash = event.event_hash
             
             self._events.append(event)
+            # Bound memory: keep the most recent window. Chain verification
+            # runs over the retained window (genesis beyond it is persisted
+            # via storage when configured).
+            MAX_AUDIT_EVENTS = 50_000
+            if len(self._events) > MAX_AUDIT_EVENTS:
+                del self._events[:-MAX_AUDIT_EVENTS]
             
             # Persist to storage if available
             if self._storage:

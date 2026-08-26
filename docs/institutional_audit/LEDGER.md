@@ -59,6 +59,9 @@
 | `core/auto_verdict.py` | ✅(جزئي) | 5 bare-except→مسجلة؛ فاحصا Integration/CodeQuality كانا no-op يعيدان الدرجة الكاملة → stub معلن بسقف درجة |
 | `job/compensation.py` | ✅(جزئي) | 6× persistence fire-and-forget: create_task بلا مرجع (GC hazard) + إسقاط صامت بلا loop → `_persist_state()` مركزية بخيوط آمنة وتسجيل؛ read-path تسجيل |
 | نمو غير محدود (أكبر 3) | ✅ | self_reflection 200/agent · tracing queue 10k · metric points 5k |
+| `routing/service.py` | ✅(جزئي) | fallback الازدحام: saturated-but-healthy تُعاد بدل فشل التوجيه الكلي تحت الحمل (مُثبت)؛ دلالات strict-probe للقاطع موثقة؛ الموازنات السبع سليمة |
+| `governance/service.py` | ✅(جزئي) | مقيّم تعبيرات آمن جديد (بدون eval): dotted-paths مع flat-fallback، and/or/not، مقارنات — سياسات الافتراضيات تشتغل فعلياً؛ ظل eval المدمج رفع؛ ALLOW لم يعد يُحسب مخالفة؛ سجل تدقيق مقصود 50k |
+
 
 
 ⬜ routing/service · governance · gateway · servicemesh · artifact/signing+store · observability/* · plugins · skill_discovery · reflections · intelligence · context_manager · constitutional · api/websocket_server · enterprise/departments الباقية (code/design/video/research/data/language/knowledge/csuite — أُنشئت وتعمل عبر master لكن لم تُدقق سطر-سطر)
