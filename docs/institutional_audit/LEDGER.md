@@ -89,3 +89,5 @@
 ---
 
 **إحصائية:** ✅ مغلق: 14 وحدة حرجة | 🟡 جزئي: 4 | ⬜ متبقٍ: ~45 ملفاً أساسياً + دعم
+
+| الذيل الأخير (observability + intelligence + reflections) | ✅ | 6 naive أخيرة → UTC (self_reflection, alert_manager, event_logger) — الصفحة النظيفة: صفر أنماط خطر متبقية في المسح الشجري |

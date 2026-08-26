@@ -8,7 +8,7 @@ import logging
 import threading
 import os
 from pathlib import Path
-from datetime import datetime
+from datetime import datetime, timezone
 from typing import Dict, List, Any, Optional
 from dataclasses import dataclass, field, asdict
 from enum import Enum
@@ -128,7 +128,7 @@ class EventLogger:
         """Log a structured event"""
         with self._lock:
             event = LogEvent(
-                timestamp=datetime.now().isoformat(),
+                timestamp=datetime.now(timezone.utc).isoformat(),
                 level=level.value,
                 category=category.value,
                 event_type=event_type,

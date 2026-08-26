@@ -7,7 +7,7 @@ import json
 import logging
 import threading
 from pathlib import Path
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, timezone
 from typing import Dict, List, Any, Optional, Callable
 from dataclasses import dataclass, field, asdict
 from enum import Enum
@@ -258,7 +258,7 @@ class AlertManager:
             metric_name=rule.metric_name,
             metric_value=value,
             threshold=rule.threshold,
-            triggered_at=datetime.now().isoformat(),
+            triggered_at=datetime.now(timezone.utc).isoformat(),
             metadata={"description": rule.description, "labels": rule.labels}
         )
 
@@ -283,7 +283,7 @@ class AlertManager:
         for alert in list(self.active_alerts.values()):
             if alert.rule_id == rule_id and alert.status == AlertStatus.FIRING:
                 alert.status = AlertStatus.RESOLVED
-                alert.resolved_at = datetime.now().isoformat()
+                alert.resolved_at = datetime.now(timezone.utc).isoformat()
                 self.active_alerts.pop(alert.id, None)
                 self.stats.firing_alerts = sum(
                     1 for a in self.active_alerts.values()
@@ -298,7 +298,7 @@ class AlertManager:
                 return False
             alert = self.active_alerts.pop(alert_id)
             alert.status = AlertStatus.RESOLVED
-            alert.resolved_at = datetime.now().isoformat()
+            alert.resolved_at = datetime.now(timezone.utc).isoformat()
             self.stats.firing_alerts = sum(
                 1 for a in self.active_alerts.values()
                 if a.status == AlertStatus.FIRING
@@ -313,7 +313,7 @@ class AlertManager:
             alert = self.active_alerts[alert_id]
             alert.status = AlertStatus.SILENCED
             alert.metadata["silenced_until"] = (
-                datetime.now() + timedelta(seconds=duration_seconds)
+                datetime.now(timezone.utc) + timedelta(seconds=duration_seconds)
             ).isoformat()
             self.stats.firing_alerts = sum(
                 1 for a in self.active_alerts.values()

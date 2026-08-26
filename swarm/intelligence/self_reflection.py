@@ -5,7 +5,7 @@ Implements structured reflection protocol for continuous improvement
 import json
 import time
 import logging
-from datetime import datetime
+from datetime import datetime, timezone
 from typing import Dict, List, Any, Optional
 from dataclasses import dataclass, field, asdict
 from enum import Enum
@@ -145,7 +145,7 @@ class SelfReflectionEngine:
                 task_id=task_id,
                 trigger=trigger,
                 depth=depth,
-                timestamp=datetime.now().isoformat(),
+                timestamp=datetime.now(timezone.utc).isoformat(),
                 what_went_well="",
                 what_could_improve="",
                 what_was_unexpected="",
