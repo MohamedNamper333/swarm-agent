@@ -276,8 +276,10 @@ class PluginManager:
             if entry:
                 try:
                     entry.plugin.on_shutdown()
-                except Exception:
-                    pass
+                except Exception as e:
+                    # A misbehaving plugin must not block unloading, but the
+                    # failure is never silent (audit: swallow-pass sweep).
+                    logger.warning(f"Plugin '{name}' on_shutdown failed: {e}")
                 self._refresh_stats()
                 return True
         return False

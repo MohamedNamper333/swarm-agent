@@ -59,6 +59,8 @@
 | `core/auto_verdict.py` | ✅(جزئي) | 5 bare-except→مسجلة؛ فاحصا Integration/CodeQuality كانا no-op يعيدان الدرجة الكاملة → stub معلن بسقف درجة |
 | `job/compensation.py` | ✅(جزئي) | 6× persistence fire-and-forget: create_task بلا مرجع (GC hazard) + إسقاط صامت بلا loop → `_persist_state()` مركزية بخيوط آمنة وتسجيل؛ read-path تسجيل |
 | نمو غير محدود (أكبر 3) | ✅ | self_reflection 200/agent · tracing queue 10k · metric points 5k |
+| `plugins/loader.py` | ✅ | on_shutdown swallow-pass → مسجل (إلغاء التحميل لا يعلق لكنه لا يصمت) |
+| `constitutional/*`, `context_manager/*` | ✅ | حزم فارغة مشروعة (re-export عبر intelligence) — لا كود ميت |
 | `websocket_server.py` | ✅ | 14 طابعاً زمنياً naive → UTC-aware |
 | نمو غير محدود (الدفعة الثانية) | ✅ | constitutional_audit 5k · compaction_history 2k · skill_discovery 5k · constitutional_guard 5k · inter_agent_bus 10k — كلها مقصوصة |
 | `artifact/store.py` | ✅(جزئي) | AR-N1 🔴: traversal قراءة/كتابة على كل الجهاز (realpath guard)؛ N2: checksum_verified كان يُختم بلا تحقق → verify-after-write مع حذف الفاسد؛ N3: non-seekable buffering؛ N4: whitelist للـ updates |
