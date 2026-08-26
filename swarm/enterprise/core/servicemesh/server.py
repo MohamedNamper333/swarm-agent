@@ -283,18 +283,23 @@ class CertificateAuthority:
         ).not_valid_before(
             datetime.now(timezone.utc)
         ).not_valid_after(
-            datetime.now(timezone.utc) + timedelta(hours=self.cert_ttl_hours)
+            # SM-N3 fix: caller-supplied ttl was computed then ignored —
+            # every cert silently lived the default 24h.
+            datetime.now(timezone.utc) + timedelta(hours=ttl_hours)
         ).add_extension(
             x509.SubjectAlternativeName(san_list),
             critical=False,
         ).add_extension(
             x509.KeyUsage(
                 digital_signature=True,
+                content_commitment=False,
                 key_encipherment=True,
-                key_agreement=False,
                 data_encipherment=False,
+                key_agreement=False,
                 key_cert_sign=False,
                 crl_sign=False,
+                encipher_only=False,
+                decipher_only=False,
             ),
             critical=True,
         ).add_extension(
@@ -319,10 +324,14 @@ class CertificateAuthority:
         cert_info = {
             "service_name": service_name,
             "namespace": namespace,
+            "serial_number": cert.serial_number,
             "issued_at": datetime.now(timezone.utc),
-            "expires_at": datetime.now(timezone.utc) + timedelta(hours=self.cert_ttl_hours),
+            "expires_at": datetime.now(timezone.utc) + timedelta(hours=ttl_hours),
             "cert_pem": cert_pem.decode(),
-            "key_pem": key_pem.decode(),
+            # N2 fix: private keys are NEVER retained server-side; the
+            # caller owns them. (Old code parked every workload key in a
+            # plaintext dict forever.)
+            "revoked": False,
         }
 
         cert_key = f"{san_dns[0] if san_dns else service_name}"
@@ -331,11 +340,28 @@ class CertificateAuthority:
         return cert_pem, key_pem
 
     def revoke_certificate(self, cert_key: str) -> bool:
-        """Revoke a certificate."""
-        if cert_key in self._issued_certs:
-            del self._issued_certs[cert_key]
-            return True
-        return False
+        """Mark a certificate revoked (N1 fix).
+
+        Previously this DELETED the record and returned True while the
+        certificate remained cryptographically valid everywhere — revocation
+        theater. Now the record survives with revoked=True and enforcement
+        points can query is_revoked()/is_serial_revoked().
+        """
+        rec = self._issued_certs.get(cert_key)
+        if not rec:
+            return False
+        rec["revoked"] = True
+        logger.warning(f"Certificate revoked: {cert_key} "
+                       f"(serial={rec.get('serial_number')})")
+        return True
+
+    def is_revoked(self, cert_key: str) -> bool:
+        rec = self._issued_certs.get(cert_key)
+        return bool(rec and rec.get("revoked"))
+
+    def is_serial_revoked(self, serial_number: int) -> bool:
+        return any(rec.get("revoked") and rec.get("serial_number") == serial_number
+                   for rec in self._issued_certs.values())
 
     def get_ca_cert(self) -> bytes:
         return self._ca_cert
@@ -524,9 +550,20 @@ class MTLSManager:
         return self.default_mode
 
     async def get_certificate(self, service_name: str, namespace: str) -> Tuple[bytes, bytes]:
-        """Get or generate certificate for service."""
-        # This would integrate with CertificateAuthority
-        pass
+        """Issue (or re-issue) a workload cert via the mesh CA.
+
+        Was a bare `pass` returning None inside the mTLS critical path —
+        callers unpacking the tuple crashed with TypeError.
+        """
+        san_dns = [
+            f"{service_name}.{namespace}.svc.mesh.local",
+            service_name,
+        ]
+        return await self.ca.issue_certificate(
+            service_name=service_name,
+            namespace=namespace,
+            san_dns=san_dns,
+        )
 
 
 # =============================================================================
