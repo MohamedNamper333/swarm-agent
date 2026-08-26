@@ -188,10 +188,15 @@ class JobScheduler:
         self._scheduler_thread: Optional[threading.Thread] = None
         self._lock = threading.RLock()
         
-        # Register signal handlers
-        import signal
-        signal.signal(signal.SIGTERM, self._signal_handler)
-        signal.signal(signal.SIGINT, self._signal_handler)
+        # Register signal handlers (main thread only — signal.signal()
+        # raises ValueError from worker threads; the REST server boots the
+        # scheduler inside uvicorn's worker thread, which crashed startup).
+        import signal, threading as _th
+        if _th.current_thread() is _th.main_thread():
+            signal.signal(signal.SIGTERM, self._signal_handler)
+            signal.signal(signal.SIGINT, self._signal_handler)
+        else:
+            logger.debug("Scheduler in non-main thread; signal handlers skipped")
     
     def _signal_handler(self, signum, frame):
         logger.info(f"Scheduler received signal {signum}, initiating shutdown")

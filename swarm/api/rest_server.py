@@ -216,6 +216,29 @@ async def lifespan(app: FastAPI):
     _agent_state.register("researcher-01", ASState.IDLE)
     logger.info("AgentRegistry ready (4 agents registered)")
 
+    # Wire up model registry + constitutional guard for /models + /constitutional/*
+    global _model_registry, _constitutional_guard, _skill_discovery
+    try:
+        from swarm.enterprise.core.model_registry_v2 import EnterpriseModelRegistry as _EMR
+        _model_registry = _EMR()
+        logger.info(f"ModelRegistry ready ({_model_registry.summary()['unique_models']} models)")
+    except Exception as e:
+        logger.warning(f"ModelRegistry init failed: {e}")
+
+    try:
+        from swarm.intelligence.constitutional_guard import get_constitutional_guard
+        _constitutional_guard = get_constitutional_guard()
+        logger.info("ConstitutionalGuard ready")
+    except Exception as e:
+        logger.warning(f"ConstitutionalGuard init failed: {e}")
+
+    try:
+        from swarm.intelligence.skill_discovery import get_skill_discovery_engine
+        _skill_discovery = get_skill_discovery_engine()
+        logger.info("SkillDiscovery ready")
+    except Exception as e:
+        logger.warning(f"SkillDiscovery init failed: {e}")
+
     try:
         yield
     finally:
@@ -822,31 +845,37 @@ class BudgetResponse(BaseModel):
 @app.post("/budget")
 async def budget_action(request: BudgetRequest):
     """Budget tracking: check, record, report."""
+    # C3 fix: previous code called check_limit/record_usage/get_report which
+    # don't exist on RateLimiterV2 — every call was a guaranteed 500.
     try:
         from swarm.resilience.rate_limiter_v2 import get_rate_limiter
-        limiter = get_rate_limiter()
+        rl = get_rate_limiter()
 
         if request.action == "check":
-            allowed, current, limit = limiter.check_limit(request.model_id)
-            return BudgetResponse(
-                action="check",
-                model_id=request.model_id,
-                allowed=allowed,
-                remaining=limit - current,
-                usage={"current": current, "limit": limit},
-            )
+            used = rl.get_used(request.model_id)
+            limit = rl.get_limit(request.model_id)
+            allowed = used < limit
+            return {
+                "action": "check",
+                "model_id": request.model_id,
+                "allowed": allowed,
+                "remaining": max(0, limit - used),
+                "usage": {"current": used, "limit": limit},
+            }
         elif request.action == "record":
-            allowed = limiter.record_usage(request.model_id, request.tokens_used or 1)
-            return BudgetResponse(
-                action="record",
-                model_id=request.model_id,
-                allowed=allowed,
-            )
+            ok, reason = rl.acquire_ex(request.model_id, concurrent=10000)
+            return {
+                "action": "record",
+                "model_id": request.model_id,
+                "allowed": ok,
+                "reason": reason,
+            }
         elif request.action == "report":
-            report = limiter.get_report()
-            return {"action": "report", "report": report}
+            return {"action": "report", "report": rl.stats()}
         else:
             raise HTTPException(400, f"Unknown action: {request.action}")
+    except HTTPException:
+        raise
     except Exception as e:
         raise HTTPException(500, str(e))
 
