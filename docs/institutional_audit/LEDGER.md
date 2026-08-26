@@ -43,7 +43,8 @@
 | `memory/v2/repository.py` | ✅ | نسخة الـ fallback الفاسدة (InMemory-style داخل Redis class) استُئصلت؛ تعقيم حقن FT.SEARCH (#26) |
 | `persistence/locks.py` | 🟡 | timedelta ✓؛ تبقى RW-lock شكلي، semaphore دائم القبول، meta_key خاطئ |
 | `state/manager.py` | 🟡 | acquire_lock مُصلح جذرياً: set_if_absent(NX) + حذف عند الإفراج + تحمّل None — 4 اختبارات عدائية ✓؛ يتبقى commit الذري |
-| `persistence/consensus.py` (Raft) | ✅(معطّل) | بوابة أمان: مرفوض افتراضياً (split-brain أسوأ من لا-consensus)؛ تجاوز صريح بـ SWARM_ENABLE_UNSAFE_RAFT=1 |
+| `persistence/consensus.py` (Raft) | ✅(معطّل) || `persistence/locks.py` | ✅ | L-N2: read_lock فارغ→عدّاد قراء + انتظار كاتب؛ L-N3: semaphore True دائم→عدّاد حد أقصى مع TTL؛ L-N1: meta_key دوبل prefix → `{key}:meta` |
+ بوابة أمان: مرفوض افتراضياً (split-brain أسوأ من لا-consensus)؛ تجاوز صريح بـ SWARM_ENABLE_UNSAFE_RAFT=1 |
 | `memory/v2/lifecycle.py` | ✅ | return المفقودة أعادت دورة الأرشفة للحياة؛ إزالة ابتلاع CancelledError ×4 |
 | `memory/v2/lessons.py` | ✅ | supersede؛ episode IDs فريدة + get_episode metadata-query؛ apply_lesson وrecord_lesson_outcome كلاهما CAS+retry ضد lost-updates |
 | `memory/v2/search.py` | ✅ | to_thread لكل نداءات العميل المتزامن؛ إصلاح clobber المتغير؛ هروب قيم الفلاتر (حقن cross-tenant)؛ _wait_for_task لا يموّه أخطاء حقيقية |

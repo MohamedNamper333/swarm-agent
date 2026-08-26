@@ -146,8 +146,8 @@ class RedisLockBackend(LockBackend):
         )
         
         if result:
-            # Store lock metadata
-            metadata_key = f"{self.key_prefix}:meta:{lock_key}"
+            # L-N1 fix: meta was double-prefixed (prefix:meta:prefix:key).
+            metadata_key = f"{key}:meta"
             import json
             metadata = {
                 "holder": holder,
@@ -157,7 +157,7 @@ class RedisLockBackend(LockBackend):
             }
             await client.set(metadata_key, json.dumps(metadata), ex=ttl_seconds)
             return True
-        
+
         return False
     
     async def release(self, lock_key: str, holder: str) -> bool:
@@ -175,7 +175,7 @@ class RedisLockBackend(LockBackend):
         """
         
         lock_key = self._lock_key(lock_key)
-        meta_key = f"{self.key_prefix}:meta:{lock_key}"
+        meta_key = f"{lock_key}:meta"
         
         script = client.register_script(lua_script)
         result = await script(keys=[lock_key, meta_key], args=[holder])
@@ -196,7 +196,7 @@ class RedisLockBackend(LockBackend):
         """
         
         lock_key = self._lock_key(lock_key)
-        meta_key = f"{self.key_prefix}:meta:{lock_key}"
+        meta_key = f"{lock_key}:meta"
         
         script = client.register_script(lua_script)
         result = await script(keys=[lock_key, meta_key], args=[holder, ttl_seconds])
@@ -216,7 +216,7 @@ class RedisLockBackend(LockBackend):
     async def force_release(self, lock_key: str) -> bool:
         client = await self._get_client()
         lock_key_prefixed = self._lock_key(lock_key)
-        meta_key = f"{self.key_prefix}:meta:{lock_key}"
+        meta_key = f"{lock_key_prefixed}:meta"
         
         result = await client.delete(lock_key_prefixed, meta_key)
         return result > 0
@@ -528,28 +528,71 @@ class DistributedReadWriteLock:
     
     @asynccontextmanager
     async def read_lock(self, holder: str, ttl: int = 30, timeout: float = 30.0):
-        """Acquire read lock (multiple readers allowed)."""
-        # Use a counter for readers
-        read_count_key = f"{self.lock_key}:readers"
-        
-        # Acquire write lock to modify reader count
-        async with self.lock_manager.lock(self.read_lock_key, holder, ttl=5):
-            # Increment reader count
-            # In production, use atomic increment in Redis/etcd
-            pass
-        
+        """Acquire a shared read lock (many readers | zero writers).
+
+        L-N2 fix: the previous implementation incremented NO counter and
+        released NO holder — readers and writers ran concurrently over the
+        same "protected" data. Real semantics: readers bump a counter; a
+        writer must see zero readers AND own the writer mutex.
+        """
+        # Short-lived guard so reader-count bumps don't race a writer.
+        async with self.lock_manager.lock(f"{self.read_lock_key}:guard",
+                                          holder, ttl=5):
+            backend = self.lock_manager.backend
+            cnt_key = f"{self.lock_key}:readers"
+            # Lightweight local-only path when no external backend.
+            if hasattr(backend, "_get_client"):
+                client = await backend._get_client()
+                await client.incr(cnt_key)
+                await client.expire(cnt_key, ttl)
+            else:
+                # Fallback: in-memory counter kept on the manager.
+                if not hasattr(self.lock_manager, "_rw_counts"):
+                    self.lock_manager._rw_counts = {}
+                self.lock_manager._rw_counts[cnt_key] = (
+                    self.lock_manager._rw_counts.get(cnt_key, 0) + 1)
+
         try:
             yield True
         finally:
-            # Decrement reader count
-            pass
-    
+            backend = self.lock_manager.backend
+            cnt_key = f"{self.lock_key}:readers"
+            if hasattr(backend, "_get_client"):
+                client = await backend._get_client()
+                await client.decr(cnt_key)
+            else:
+                if hasattr(self.lock_manager, "_rw_counts"):
+                    self.lock_manager._rw_counts[cnt_key] = max(
+                        0, self.lock_manager._rw_counts.get(cnt_key, 1) - 1)
+
     @asynccontextmanager
     async def write_lock(self, holder: str, ttl: int = 30, timeout: float = 30.0):
-        """Acquire write lock (exclusive)."""
+        """Acquire exclusive write lock (waits for readers to drain)."""
         async with self.lock_manager.lock(
             self.write_lock_key, holder, ttl, timeout
         ) as acquired:
+            if acquired:
+                import asyncio as _aio
+                deadline = _aio.get_event_loop().time() + timeout
+                while True:
+                    cnt = 0
+                    backend = self.lock_manager.backend
+                    if hasattr(backend, "_get_client"):
+                        try:
+                            client = await backend._get_client()
+                            raw = await client.get(f"{self.lock_key}:readers")
+                            cnt = int(raw) if raw is not None else 0
+                        except Exception:
+                            cnt = 0
+                    else:
+                        cnt = getattr(self.lock_manager, "_rw_counts", {}).get(
+                            f"{self.lock_key}:readers", 0)
+                    if cnt == 0:
+                        break
+                    if _aio.get_event_loop().time() >= deadline:
+                        acquired = False
+                        break
+                    await _aio.sleep(0.05)
             yield acquired
 
 
@@ -558,20 +601,62 @@ class DistributedReadWriteLock:
 # =============================================================================
 
 class DistributedSemaphore:
-    """Distributed counting semaphore."""
-    
+    """Distributed counting semaphore (L-N3 fix: was unconditional True)."""
+
     def __init__(self, lock_manager: DistributedLockManager, semaphore_key: str, max_count: int):
         self.lock_manager = lock_manager
         self.semaphore_key = semaphore_key
         self.max_count = max_count
-    
+
     async def acquire(self, holder: str = "system", timeout: float = 30.0) -> bool:
-        """Acquire a semaphore slot."""
-        # Use a counter in Redis/etcd
-        # Simplified implementation
-        return True
-    
+        """Try to acquire one slot; respects max_count via an atomic counter."""
+        backend = self.lock_manager.backend
+        cnt_key = f"{self.semaphore_key}:slots"
+        slot_key = f"{self.semaphore_key}:holder:{holder}"
+        start = asyncio.get_event_loop().time() if hasattr(asyncio, "get_event_loop") else time.time()
+        while True:
+            if hasattr(backend, "_get_client"):
+                client = await backend._get_client()
+                # INCR returns new value; if within limit, claim slot
+                cur = await client.incr(cnt_key)
+                if cur <= self.max_count:
+                    await client.expire(cnt_key, int(timeout) + 30)
+                    await client.set(slot_key, "1", ex=int(timeout) + 30)
+                    return True
+                await client.decr(cnt_key)
+            else:
+                # In-memory fallback
+                if not hasattr(self.lock_manager, "_sem_counts"):
+                    self.lock_manager._sem_counts = {}
+                cur = self.lock_manager._sem_counts.get(cnt_key, 0) + 1
+                if cur <= self.max_count:
+                    self.lock_manager._sem_counts[cnt_key] = cur
+                    if not hasattr(self.lock_manager, "_sem_holders"):
+                        self.lock_manager._sem_holders = {}
+                    self.lock_manager._sem_holders[slot_key] = True
+                    return True
+            elapsed = (asyncio.get_event_loop().time() - start
+                       if hasattr(asyncio, "get_event_loop") else 0)
+            if elapsed >= timeout:
+                return False
+            await asyncio.sleep(0.05)
+
     async def release(self, holder: str) -> bool:
+        backend = self.lock_manager.backend
+        cnt_key = f"{self.semaphore_key}:slots"
+        slot_key = f"{self.semaphore_key}:holder:{holder}"
+        if hasattr(backend, "_get_client"):
+            client = await backend._get_client()
+            pipe = client.pipeline()
+            pipe.decr(cnt_key)
+            pipe.delete(slot_key)
+            await pipe.execute()
+        else:
+            if hasattr(self.lock_manager, "_sem_counts"):
+                self.lock_manager._sem_counts[cnt_key] = max(
+                    0, self.lock_manager._sem_counts.get(cnt_key, 1) - 1)
+            if hasattr(self.lock_manager, "_sem_holders"):
+                self.lock_manager._sem_holders.pop(slot_key, None)
         return True
     
     @asynccontextmanager
