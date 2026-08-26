@@ -8,7 +8,7 @@ import time
 import logging
 import re
 from pathlib import Path
-from datetime import datetime
+from datetime import datetime, timezone
 from typing import Dict, List, Any, Optional, Tuple
 from dataclasses import dataclass, field, asdict
 from enum import Enum
@@ -316,7 +316,7 @@ class ConstitutionalGuard:
                 passed_principles=passed,
                 failed_principles=failed,
                 requires_human_review=requires_human,
-                timestamp=datetime.now().isoformat(),
+                timestamp=datetime.now(timezone.utc).isoformat(),
                 artifact_type=artifact_type,
                 metadata=metadata or {}
             )
@@ -378,7 +378,7 @@ class ConstitutionalGuard:
                     evidence=match.group(0)[:200],
                     matched_pattern=pattern,
                     recommendation=self._get_recommendation(principle),
-                    timestamp=datetime.now().isoformat()
+                    timestamp=datetime.now(timezone.utc).isoformat()
                 )
                 violations.append(violation)
 
@@ -398,7 +398,7 @@ class ConstitutionalGuard:
                     evidence="Missing source/citation for claims",
                     matched_pattern="missing_evidence",
                     recommendation="Add source references or 'based on ...' attributions",
-                    timestamp=datetime.now().isoformat()
+                    timestamp=datetime.now(timezone.utc).isoformat()
                 )
                 violations.append(violation)
 

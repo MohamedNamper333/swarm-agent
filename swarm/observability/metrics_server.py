@@ -6,7 +6,7 @@ import time
 import threading
 import logging
 from pathlib import Path
-from datetime import datetime
+from datetime import datetime, timezone
 from typing import Dict, List, Any, Optional, Callable
 from dataclasses import dataclass, field
 from enum import Enum
@@ -231,7 +231,7 @@ class MetricsServer:
                     "quantiles": quantiles
                 }
             return MetricsSnapshot(
-                timestamp=datetime.now().isoformat(),
+                timestamp=datetime.now(timezone.utc).isoformat(),
                 counters=dict(self.counters),
                 gauges=dict(self.gauges),
                 histograms=histograms,

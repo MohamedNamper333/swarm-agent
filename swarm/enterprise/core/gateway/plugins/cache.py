@@ -69,11 +69,11 @@ class CacheStats:
 
 class CacheBackend(ABC):
     """Abstract cache backend."""
-    
+
     @abstractmethod
     async def get(self, key: str) -> Optional[bytes]:
         pass
-    
+
     @abstractmethod
     async def set(
         self,
@@ -83,57 +83,44 @@ class CacheBackend(ABC):
         metadata: Optional[Dict] = None,
     ) -> bool:
         pass
-    
-    @abstractmethod
-    async def delete(self, key: str) -> bool:
-        pass
-    
-    @abstractmethod
-    async def exists(self, key: str) -> bool:
-        pass
-    
-    @abstractmethod
-    async def clear(self) -> int:
-        pass
-    
-    @abstractmethod
-    async def get_stats(self) -> Dict[str, Any]:
-        pass
+
+    @staticmethod
+    def _entry_size(key: str, value: bytes) -> int:
+        """Consistent accounting helper shared by backends."""
+        return len(key.encode()) + len(value) + 64
 
 
-class MemoryCacheBackend:
+class MemoryCacheBackend(CacheBackend):
     """In-memory cache backend with LRU eviction."""
-    
+
     def __init__(self, max_size_mb: int = 100, max_entries: int = 10000):
         self._cache: Dict[str, Dict[str, Any]] = {}
-        self._access_order: OrderedDict = OrderedDict()
+        self._access_order: "OrderedDict" = OrderedDict()
         self._max_size_bytes = max_size_mb * 1024 * 1024
         self._max_entries = max_entries
         self._current_size_bytes = 0
         self._lock = asyncio.Lock()
-        self._stats = {
-            "hits": 0,
-            "misses": 0,
-            "evictions": 0,
-        }
-    
+        self._stats = {"hits": 0, "misses": 0, "evictions": 0}
+
     async def get(self, key: str) -> Optional[bytes]:
         async with self._lock:
             if key not in self._cache:
                 self._stats["misses"] += 1
                 return None
-            
+
             entry = self._cache[key]
             if entry["expires_at"] and datetime.now(timezone.utc) > entry["expires_at"]:
                 del self._cache[key]
+                self._access_order.pop(key, None)
+                self._current_size_bytes -= entry.get("size", 0)
                 self._stats["misses"] += 1
                 return None
-            
+
             # Move to end (LRU)
             self._access_order.move_to_end(key)
             self._stats["hits"] += 1
             return entry["value"]
-    
+
     async def set(
         self,
         key: str,
@@ -142,46 +129,60 @@ class MemoryCacheBackend:
         metadata: Optional[Dict] = None,
     ) -> bool:
         async with self._lock:
-            # Check size limits
-            value_size = len(value)
-            if value_size > self._max_size_bytes:
+            new_size = self._entry_size(key, value)
+            if new_size > self._max_size_bytes:
                 return False
-            
-            # Evict if needed
-            await self._ensure_space(len(key) + len(key.encode()) + len(key.encode()) + len(key))
-            
+
+            # Drop stale entry if overwriting (its old size must be removed)
+            old = self._cache.get(key)
+            if old is not None:
+                self._current_size_bytes -= old.get(
+                    "size", self._entry_size(key, old.get("value", b"")))
+                self._access_order.pop(key, None)
+
+            await self._ensure_space(new_size)
+
             expires_at = datetime.now(timezone.utc) + timedelta(seconds=ttl_seconds)
-            
             self._cache[key] = {
                 "value": value,
-                "created_at": datetime.now(timezone.utc),
                 "expires_at": expires_at,
-                "size": len(key) + len(key.encode()) + len(key),
+                "size": new_size,
             }
-            
             self._access_order[key] = True
             self._access_order.move_to_end(key)
-            self._current_size_bytes += value_size
-            
+            self._current_size_bytes += new_size
             return True
-    
+
     async def _ensure_space(self, needed_bytes: int) -> None:
-        while (self._current_size_bytes + needed_bytes > self._max_size_bytes or
-               len(self._cache) >= self._max_entries):
+        """LRU eviction until the new entry fits BOTH byte and count caps.
+
+        Fixed three defects: eviction never subtracted the evicted entry's
+        size from _current_size_bytes (accounting drifted up forever), the
+        per-entry "size" field measured 3x-key-length instead of the payload
+        (so _max_size_mb gated nothing), and expired entries deleted in get()
+        leaked both size and access_order slots.
+        """
+        while (
+            self._current_size_bytes + needed_bytes > self._max_size_bytes
+            or len(self._cache) >= self._max_entries
+        ):
             if not self._access_order:
                 break
-            # Evict LRU
             oldest_key = next(iter(self._access_order))
-            del self._cache[oldest_key]
-            del self._access_order[oldest_key]
+            entry = self._cache.pop(oldest_key, None)
+            self._access_order.pop(oldest_key, None)
+            if entry is not None:
+                self._current_size_bytes -= entry.get(
+                    "size", self._entry_size(oldest_key, entry.get("value", b"")))
             self._stats["evictions"] += 1
-    
+
     async def delete(self, key: str) -> bool:
         async with self._lock:
             if key in self._cache:
                 entry = self._cache.pop(key)
                 self._access_order.pop(key, None)
-                self._current_size_bytes -= len(key)
+                self._current_size_bytes -= entry.get(
+                    "size", self._entry_size(key, entry.get("value", b"")))
                 return True
             return False
     
@@ -191,6 +192,8 @@ class MemoryCacheBackend:
                 entry = self._cache[key]
                 if entry["expires_at"] and datetime.now(timezone.utc) > entry["expires_at"]:
                     del self._cache[key]
+                    self._access_order.pop(key, None)
+                    self._current_size_bytes -= entry.get("size", 0)
                     return False
                 return True
             return False
@@ -329,20 +332,8 @@ class CacheRule:
 
 
 @dataclass
-class CacheEntry:
-    key: str
-    value: bytes
-    headers: Dict[str, str] = field(default_factory=dict)
-    status_code: int = 200
-    created_at: datetime = field(default_factory=lambda: datetime.now(timezone.utc))
-    expires_at: Optional[datetime] = None
-    access_count: int = 0
-    last_accessed: datetime = field(default_factory=lambda: datetime.now(timezone.utc))
-    vary_headers: List[str] = field(default_factory=list)
-    etag: Optional[str] = None
-    compressed: bool = False
-    original_size: int = 0
-    compressed_size: int = 0
+
+
 
 
 class CacheManager:
@@ -562,9 +553,6 @@ class CacheManager:
         stats["hit_rate"] = stats["hits"] / max(total, 1)
         return stats
     
-    def get_stats(self) -> Dict[str, Any]:
-        return self._stats
-
 
 # =============================================================================
 # Response Caching Middleware

@@ -8,7 +8,7 @@ import time
 import logging
 import re
 from pathlib import Path
-from datetime import datetime
+from datetime import datetime, timezone
 from typing import Dict, List, Any, Optional, Set, Tuple
 from dataclasses import dataclass, field, asdict
 from enum import Enum
@@ -53,7 +53,7 @@ class SkillMetadata:
     usage_count: int = 0
     avg_success_rate: float = 0.0
     avg_match_score: float = 0.0
-    indexed_at: str = field(default_factory=lambda: datetime.now().isoformat())
+    indexed_at: str = field(default_factory=lambda: datetime.now(timezone.utc).isoformat())
 
 
 @dataclass
@@ -348,7 +348,7 @@ class SkillDiscoveryEngine:
             return []
 
         self.stats.total_discoveries += 1
-        self.stats.last_discovery_time = datetime.now().isoformat()
+        self.stats.last_discovery_time = datetime.now(timezone.utc).isoformat()
 
         task_keywords = self._extract_task_keywords(task_description)
         matches = []
@@ -389,7 +389,7 @@ class SkillDiscoveryEngine:
         self.task_history.append({
             "task_description": task_description[:200],
             "discovered_skills": [m.skill_id for m in matches[:top_k]],
-            "timestamp": datetime.now().isoformat()
+            "timestamp": datetime.now(timezone.utc).isoformat()
         })
         if len(self.task_history) > 5000:
             del self.task_history[:-5000]
@@ -488,7 +488,7 @@ class SkillDiscoveryEngine:
 
             skill = self.skill_index[skill_id]
             skill.usage_count += 1
-            skill.last_used = datetime.now().isoformat()
+            skill.last_used = datetime.now(timezone.utc).isoformat()
 
             # Update rolling success rate
             old_rate = skill.avg_success_rate

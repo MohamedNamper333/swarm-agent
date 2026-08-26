@@ -6,7 +6,7 @@ import time
 import logging
 from typing import Dict, List, Any, Optional, Callable
 from dataclasses import dataclass, field
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, timezone
 from enum import Enum
 from collections import defaultdict
 import uuid
@@ -33,7 +33,7 @@ class Message:
     from_agent: str = ""
     to_agent: str = ""  # Empty = broadcast
     channel: str = ""
-    timestamp: str = field(default_factory=lambda: datetime.now().isoformat())
+    timestamp: str = field(default_factory=lambda: datetime.now(timezone.utc).isoformat())
     payload: Dict[str, Any] = field(default_factory=dict)
     delivered_to: List[str] = field(default_factory=list)
     acknowledged: bool = False
@@ -131,7 +131,7 @@ class AgentBus:
         """Request a review from one or more reviewers."""
         review_id = str(uuid.uuid4())
         criteria = criteria or ["correctness", "security", "performance", "maintainability"]
-        deadline = (datetime.now() + timedelta(minutes=deadline_minutes)).isoformat()
+        deadline = (datetime.now(timezone.utc) + timedelta(minutes=deadline_minutes)).isoformat()
 
         req = {
             "type": "review_request",
@@ -153,7 +153,7 @@ class AgentBus:
 
         with self._lock:
             self.pending_reviews[review_id] = {
-                "requested_at": datetime.now().isoformat(),
+                "requested_at": datetime.now(timezone.utc).isoformat(),
                 "reviewers": reviewers,
                 "responses": [],
                 "status": "pending"
@@ -169,7 +169,7 @@ class AgentBus:
             "reviewer": reviewer,
             "verdict": verdict,  # "approve", "reject", "request_changes"
             "findings": findings,
-            "submitted_at": datetime.now().isoformat()
+            "submitted_at": datetime.now(timezone.utc).isoformat()
         }
 
         with self._lock:
@@ -222,7 +222,7 @@ class AgentBus:
                 "blockers": context.get("blockers", []),
                 "open_questions": context.get("open_questions", [])
             },
-            "timestamp": datetime.now().isoformat()
+            "timestamp": datetime.now(timezone.utc).isoformat()
         }
 
         self.send_direct(from_agent, to_agent, MessageType.HANDOFF, handoff_package)

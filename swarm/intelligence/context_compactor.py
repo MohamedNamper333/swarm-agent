@@ -8,7 +8,7 @@ import time
 import logging
 import re
 from pathlib import Path
-from datetime import datetime
+from datetime import datetime, timezone
 from typing import Dict, List, Any, Optional, Tuple
 from dataclasses import dataclass, field, asdict
 from enum import Enum
@@ -163,7 +163,7 @@ class ContextCompactor:
                     "original_id": entry_id,
                     "original_size": original_size,
                     "compaction_strategy": strategy.value,
-                    "compacted_at": datetime.now().isoformat()
+                    "compacted_at": datetime.now(timezone.utc).isoformat()
                 }
             )
 
@@ -180,7 +180,7 @@ class ContextCompactor:
                 strategy=strategy,
                 preserved_keys=self._extract_preserved_keys(entry.value, compacted_value),
                 dropped_keys=[],
-                timestamp=datetime.now().isoformat()
+                timestamp=datetime.now(timezone.utc).isoformat()
             )
 
             self._record_stats(result, strategy)

@@ -8,7 +8,7 @@ import time
 import logging
 import hashlib
 from pathlib import Path
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, timezone
 from typing import Dict, List, Any, Optional, Tuple
 from dataclasses import dataclass, field, asdict
 from enum import Enum
@@ -212,7 +212,7 @@ class ConstitutionalAudit:
             entry = AuditEntry(
                 id=f"audit-{uuid.uuid4().hex[:12]}",
                 event_type=AuditEventType.VIOLATION_RESOLVED,
-                timestamp=datetime.now().isoformat(),
+                timestamp=datetime.now(timezone.utc).isoformat(),
                 artifact_id=violation.artifact_id,
                 agent_id=resolver_id,
                 principle=violation.principle,
@@ -235,7 +235,7 @@ class ConstitutionalAudit:
         """Generate compliance report for a specific agent"""
         with self._lock:
             cutoff = (
-                datetime.now() - timedelta(days=period_days)
+                datetime.now(timezone.utc) - timedelta(days=period_days)
             ).isoformat()
 
             agent_checks = [
@@ -257,7 +257,7 @@ class ConstitutionalAudit:
                     top_violation_patterns=[],
                     recommendations=["No recent activity to evaluate"],
                     period_start=cutoff,
-                    period_end=datetime.now().isoformat()
+                    period_end=datetime.now(timezone.utc).isoformat()
                 )
 
             total = len(agent_checks)
@@ -309,7 +309,7 @@ class ConstitutionalAudit:
                 top_violation_patterns=top_pattern_list,
                 recommendations=recommendations,
                 period_start=cutoff,
-                period_end=datetime.now().isoformat()
+                period_end=datetime.now(timezone.utc).isoformat()
             )
 
             self.agent_reports[agent_id] = report
@@ -321,7 +321,7 @@ class ConstitutionalAudit:
             total_checks = len(self.guard.check_history)
             if total_checks == 0:
                 return SystemComplianceDashboard(
-                    timestamp=datetime.now().isoformat(),
+                    timestamp=datetime.now(timezone.utc).isoformat(),
                     total_checks=0,
                     overall_pass_rate=0.0,
                     system_compliance_level=ComplianceLevel.GOOD,
@@ -400,7 +400,7 @@ class ConstitutionalAudit:
             trend = self._calculate_trend(days=7)
 
             return SystemComplianceDashboard(
-                timestamp=datetime.now().isoformat(),
+                timestamp=datetime.now(timezone.utc).isoformat(),
                 total_checks=total_checks,
                 overall_pass_rate=pass_rate,
                 system_compliance_level=level,
@@ -446,7 +446,7 @@ class ConstitutionalAudit:
         with self._lock:
             valid, error = self.verify_audit_chain()
             return {
-                "export_timestamp": datetime.now().isoformat(),
+                "export_timestamp": datetime.now(timezone.utc).isoformat(),
                 "chain_valid": valid,
                 "chain_error": error,
                 "total_entries": len(self.audit_log),
@@ -508,7 +508,7 @@ class ConstitutionalAudit:
         """Calculate pass rate trend over time"""
         with self._lock:
             trend = {}
-            now = datetime.now()
+            now = datetime.now(timezone.utc)
 
             for day_offset in range(days):
                 day = (now - timedelta(days=day_offset)).date().isoformat()

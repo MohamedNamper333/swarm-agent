@@ -59,6 +59,7 @@
 | `core/auto_verdict.py` | ✅(جزئي) | 5 bare-except→مسجلة؛ فاحصا Integration/CodeQuality كانا no-op يعيدان الدرجة الكاملة → stub معلن بسقف درجة |
 | `job/compensation.py` | ✅(جزئي) | 6× persistence fire-and-forget: create_task بلا مرجع (GC hazard) + إسقاط صامت بلا loop → `_persist_state()` مركزية بخيوط آمنة وتسجيل؛ read-path تسجيل |
 | نمو غير محدود (أكبر 3) | ✅ | self_reflection 200/agent · tracing queue 10k · metric points 5k |
+| `gateway/plugins/cache.py` | ✅(جزئي) | MemoryCacheBackend: محاسبة الحجم كانت 3×طول-المفتاح متجاهلة الـpayload (السعة لا تعمل!) → محاسبة موحدة + خصم عند الإخلاء/الانتهاء/الحذف؛ CacheEntry وget_stats مكرران أزيلا؛ 23 طابعاً naive → UTC في intelligence/bus/metrics |
 | `plugins/loader.py` | ✅ | on_shutdown swallow-pass → مسجل (إلغاء التحميل لا يعلق لكنه لا يصمت) |
 | `constitutional/*`, `context_manager/*` | ✅ | حزم فارغة مشروعة (re-export عبر intelligence) — لا كود ميت |
 | `websocket_server.py` | ✅ | 14 طابعاً زمنياً naive → UTC-aware |
