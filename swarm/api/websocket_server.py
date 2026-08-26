@@ -7,7 +7,7 @@ import json
 import logging
 import uuid
 from pathlib import Path
-from datetime import datetime
+from datetime import datetime, timezone
 from typing import Dict, List, Any, Optional, Set
 from dataclasses import dataclass, field
 from enum import Enum
@@ -84,8 +84,8 @@ class ConnectionManager:
             self.active_connections[client_id] = websocket
             self.client_subscriptions[client_id] = set()
             self.connection_metadata[client_id] = {
-                "connected_at": datetime.now().isoformat(),
-                "last_heartbeat": datetime.now().isoformat()
+                "connected_at": datetime.now(timezone.utc).isoformat(),
+                "last_heartbeat": datetime.now(timezone.utc).isoformat()
             }
             logger.info(f"Client {client_id} connected. Total: {len(self.active_connections)}")
     
@@ -193,7 +193,7 @@ async def websocket_endpoint(websocket: WebSocket, client_id: Optional[str] = No
         # Send welcome message
         await websocket.send_json({
             "type": "connected",
-            "timestamp": datetime.now().isoformat(),
+            "timestamp": datetime.now(timezone.utc).isoformat(),
             "payload": {"client_id": client_id}
         })
         
@@ -205,7 +205,7 @@ async def websocket_endpoint(websocket: WebSocket, client_id: Optional[str] = No
             except json.JSONDecodeError:
                 await websocket.send_json({
                     "type": "error",
-                    "timestamp": datetime.now().isoformat(),
+                    "timestamp": datetime.now(timezone.utc).isoformat(),
                     "payload": {"error": "Invalid JSON"}
                 })
             except Exception as e:
@@ -228,7 +228,7 @@ async def handle_message(client_id: str, message: Dict[str, Any]):
             await _connection_manager.subscribe(client_id, topic)
         await _connection_manager.send_personal(client_id, {
             "type": "subscribed",
-            "timestamp": datetime.now().isoformat(),
+            "timestamp": datetime.now(timezone.utc).isoformat(),
             "payload": {"topics": topics}
         })
     
@@ -238,21 +238,21 @@ async def handle_message(client_id: str, message: Dict[str, Any]):
             await _connection_manager.unsubscribe(client_id, topic)
         await _connection_manager.send_personal(client_id, {
             "type": "unsubscribed",
-            "timestamp": datetime.now().isoformat(),
+            "timestamp": datetime.now(timezone.utc).isoformat(),
             "payload": {"topics": topics}
         })
     
     elif msg_type == MessageType.HEARTBEAT.value:
         await _connection_manager.send_personal(client_id, {
             "type": "heartbeat_ack",
-            "timestamp": datetime.now().isoformat(),
-            "payload": {"server_time": datetime.now().isoformat()}
+            "timestamp": datetime.now(timezone.utc).isoformat(),
+            "payload": {"server_time": datetime.now(timezone.utc).isoformat()}
         })
     
     else:
         await _connection_manager.send_personal(client_id, {
             "type": "error",
-            "timestamp": datetime.now().isoformat(),
+            "timestamp": datetime.now(timezone.utc).isoformat(),
             "payload": {"error": f"Unknown message type: {msg_type}"}
         })
 
@@ -261,7 +261,7 @@ def broadcast_task_event(event_type: str, task_data: Dict[str, Any]):
     """Broadcast task event to subscribers"""
     asyncio.create_task(_connection_manager.broadcast("tasks", {
         "type": event_type,
-        "timestamp": datetime.now().isoformat(),
+        "timestamp": datetime.now(timezone.utc).isoformat(),
         "payload": task_data
     }))
 
@@ -270,7 +270,7 @@ def broadcast_agent_event(event_type: str, agent_data: Dict[str, Any]):
     """Broadcast agent event to subscribers"""
     asyncio.create_task(_connection_manager.broadcast("agents", {
         "type": event_type,
-        "timestamp": datetime.now().isoformat(),
+        "timestamp": datetime.now(timezone.utc).isoformat(),
         "payload": agent_data
     }))
 
@@ -279,7 +279,7 @@ def broadcast_alert(alert_data: Dict[str, Any]):
     """Broadcast alert to subscribers"""
     asyncio.create_task(_connection_manager.broadcast("alerts", {
         "type": "alert_fired",
-        "timestamp": datetime.now().isoformat(),
+        "timestamp": datetime.now(timezone.utc).isoformat(),
         "payload": alert_data
     }))
 
@@ -288,7 +288,7 @@ def broadcast_metrics(metrics: Dict[str, Any]):
     """Broadcast metrics update"""
     asyncio.create_task(_connection_manager.broadcast("metrics", {
         "type": "metrics_update",
-        "timestamp": datetime.now().isoformat(),
+        "timestamp": datetime.now(timezone.utc).isoformat(),
         "payload": metrics
     }))
 
@@ -297,7 +297,7 @@ def broadcast_system_status(status: Dict[str, Any]):
     """Broadcast system status"""
     asyncio.create_task(_connection_manager.broadcast("system", {
         "type": "system_status",
-        "timestamp": datetime.now().isoformat(),
+        "timestamp": datetime.now(timezone.utc).isoformat(),
         "payload": status
     }))
 

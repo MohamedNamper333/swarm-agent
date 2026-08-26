@@ -391,6 +391,8 @@ class SkillDiscoveryEngine:
             "discovered_skills": [m.skill_id for m in matches[:top_k]],
             "timestamp": datetime.now().isoformat()
         })
+        if len(self.task_history) > 5000:
+            del self.task_history[:-5000]
 
         return matches[:top_k]
 

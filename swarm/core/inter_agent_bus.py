@@ -79,6 +79,10 @@ class AgentBus:
         """Publish a message to a channel."""
         with self._lock:
             self.message_log.append(message)
+
+            if len(self.message_log) > 10000:
+
+                del self.message_log[:-10000]
             
             # Determine recipients
             if message.to_agent:

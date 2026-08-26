@@ -328,6 +328,12 @@ class ConstitutionalGuard:
                 self.total_violations += 1
 
             self.check_history.append(result)
+
+
+            if len(self.check_history) > 5000:
+
+
+                del self.check_history[:-5000]
             self._save_state()
 
             if status in (CheckStatus.BLOCKED, CheckStatus.FAIL):

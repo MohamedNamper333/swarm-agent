@@ -185,6 +185,10 @@ class ContextCompactor:
 
             self._record_stats(result, strategy)
             self.compaction_history.append(result)
+
+            if len(self.compaction_history) > 2000:
+
+                del self.compaction_history[:-2000]
             return result
 
     def compact_scope(

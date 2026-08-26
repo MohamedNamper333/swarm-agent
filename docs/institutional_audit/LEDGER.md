@@ -59,6 +59,8 @@
 | `core/auto_verdict.py` | ✅(جزئي) | 5 bare-except→مسجلة؛ فاحصا Integration/CodeQuality كانا no-op يعيدان الدرجة الكاملة → stub معلن بسقف درجة |
 | `job/compensation.py` | ✅(جزئي) | 6× persistence fire-and-forget: create_task بلا مرجع (GC hazard) + إسقاط صامت بلا loop → `_persist_state()` مركزية بخيوط آمنة وتسجيل؛ read-path تسجيل |
 | نمو غير محدود (أكبر 3) | ✅ | self_reflection 200/agent · tracing queue 10k · metric points 5k |
+| `websocket_server.py` | ✅ | 14 طابعاً زمنياً naive → UTC-aware |
+| نمو غير محدود (الدفعة الثانية) | ✅ | constitutional_audit 5k · compaction_history 2k · skill_discovery 5k · constitutional_guard 5k · inter_agent_bus 10k — كلها مقصوصة |
 | `artifact/store.py` | ✅(جزئي) | AR-N1 🔴: traversal قراءة/كتابة على كل الجهاز (realpath guard)؛ N2: checksum_verified كان يُختم بلا تحقق → verify-after-write مع حذف الفاسد؛ N3: non-seekable buffering؛ N4: whitelist للـ updates |
 | `servicemesh/server.py` | ✅(جزئي) | N3: ttl الممرر كان يُتجاهل (كل الشهادات 24h)؛ N1: revoke كان حذفاً كاذباً → حالة revoked + is_serial_revoked؛ N2: لا مفاتيح خاصة في الذاكرة الدائمة؛ N5: get_certificate كان pass→None (تنفيذ حقيقي عبر CA)؛ KeyUsage ناقص الحقول انهار الإصدار |
 | `gateway/server.py` | ✅(جزئي) | CircuitState مكرر أزيل؛ token bucket: float tokens (كان int() يقصّ ويجوّع المنخفض المعدل) + الإنشاء يستهلك توكناً (منحة مجانية) + دلاء مقيدة 50k مع إخلاء خامول |

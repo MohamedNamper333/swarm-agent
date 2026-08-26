@@ -159,6 +159,10 @@ class ConstitutionalAudit:
                 }
             )
             self.audit_log.append(entry)
+
+            if len(self.audit_log) > 5000:
+
+                del self.audit_log[:-5000]
             self.last_hash = entry.evidence_hash
 
             # Create violation entries
