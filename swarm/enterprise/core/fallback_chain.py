@@ -90,11 +90,25 @@ class FallbackChainExecutor:
         """
         client = nim_client or self._make_nim_client()
         if client is None:
-            logger.warning(
-                "NVIDIA_API_KEY not set — using placeholder call. "
-                "Set the env var for real inference."
+            # SAFETY: never fabricate responses silently in production. Placeholder
+            # is opt-in for offline tests only via SWARM_ALLOW_PLACEHOLDER=1.
+            import os
+            if os.environ.get("SWARM_ALLOW_PLACEHOLDER") == "1":
+                logger.warning(
+                    "NVIDIA_API_KEY not set — placeholder responses ENABLED "
+                    "(SWARM_ALLOW_PLACEHOLDER=1). For tests only!"
+                )
+                return self._placeholder_call
+            logger.error(
+                "NVIDIA_API_KEY not set and SWARM_ALLOW_PLACEHOLDER!=1 — "
+                "inference calls will fail fast. Set the env var for real inference."
             )
-            return self._placeholder_call
+
+            def _no_client_call(model_id: str, prompt: Any, timeout: float = 3.0, **kwargs):
+                raise RuntimeError(
+                    "NVIDIA_API_KEY not configured; refusing to fabricate model output"
+                )
+            return _no_client_call
 
         def nim_call(model_id: str, prompt: Any, timeout: float = 3.0, **kwargs):
             from swarm.integrations.nvidia_nim import ChatMessage
@@ -159,12 +173,22 @@ class FallbackChainExecutor:
                     })
                     break  # skip to next level
 
-                # Rate limiter gate
-                if not self._rl.acquire(model_id, concurrent=10):
-                    self._rl.record_429(model_id)
+                # Rate limiter gate — reason-aware (H1 fix):
+                # 'daily'  → real quota exhaustion: record penalty + skip level.
+                # 'rpm'    → burst window full: brief wait then retry same level.
+                # 'concurrent' → local pressure only; NEVER poisons counters.
+                ok, reason = self._rl.acquire_ex(model_id, concurrent=10)
+                if not ok:
+                    if reason == "rpm":
+                        time.sleep(0.5)
+                        ok, reason = self._rl.acquire_ex(model_id, concurrent=10)
+                        if ok:
+                            reason = None
+                    if not ok and reason == "daily":
+                        self._rl.record_429(model_id)
                     trace.append({
                         "level": level, "retry": retry + 1, "model": model_id,
-                        "skipped": "rate_limit",
+                        "skipped": f"rate_limit:{reason}",
                     })
                     break  # skip to next level
 

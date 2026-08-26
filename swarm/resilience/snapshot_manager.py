@@ -131,7 +131,7 @@ class SnapshotManager:
     Supports full and incremental snapshots with checksums.
     """
 
-    def __init__(self, storage_path: str = "swarm/resilience/snapshots"):
+    def __init__(self, storage_path: str = "data/snapshots"):
         self.storage_path = Path(storage_path)
         self.storage_path.mkdir(parents=True, exist_ok=True)
         self._lock = threading.RLock()
@@ -143,7 +143,8 @@ class SnapshotManager:
         self._load_index()
 
     def _load_index(self) -> None:
-        """Load snapshot index from disk"""
+        """Load snapshot index; quarantine corrupt index instead of silently
+        orphaning every snapshot on disk."""
         index_file = self.storage_path / "snapshot_index.json"
         if index_file.exists():
             try:
@@ -152,27 +153,34 @@ class SnapshotManager:
                 for s_id, s_data in data.get("snapshots", {}).items():
                     s_data["type"] = SnapshotType(s_data["type"])
                     s_data["status"] = SnapshotStatus(s_data["status"])
-                    snapshot = Snapshot(**s_data)
-                    self.snapshots[s_id] = snapshot
+                    self.snapshots[s_id] = Snapshot(**s_data)
                 self.stats.total_snapshots = data.get("total_snapshots", 0)
             except Exception as e:
-                logger.error(f"Failed to load snapshot index: {e}")
+                quarantine = index_file.with_suffix(
+                    f".corrupt-{datetime.now(timezone.utc).strftime('%Y%m%d-%H%M%S')}.json")
+                try:
+                    index_file.rename(quarantine)
+                except OSError:
+                    pass
+                logger.error(
+                    f"Snapshot index corrupted ({e}); quarantined to {quarantine.name}. "
+                    f"Starting fresh — orphaned .tar.gz files remain on disk for manual recovery.")
 
     def _save_index(self) -> None:
-        """Save snapshot index to disk"""
+        """Save snapshot index atomically (tmp + os.replace)."""
+        import os as _os
         index_file = self.storage_path / "snapshot_index.json"
+        tmp_file = index_file.with_suffix(".json.tmp")
         try:
-            data = {
-                "snapshots": {},
-                "total_snapshots": self.stats.total_snapshots
-            }
+            data = {"snapshots": {}, "total_snapshots": self.stats.total_snapshots}
             for s_id, snap in self.snapshots.items():
                 snap_dict = asdict(snap)
                 snap_dict["type"] = snap.type.value
                 snap_dict["status"] = snap.status.value
                 data["snapshots"][s_id] = snap_dict
-            with open(index_file, "w") as f:
+            with open(tmp_file, "w") as f:
                 json.dump(data, f, indent=2)
+            _os.replace(tmp_file, index_file)
         except Exception as e:
             logger.error(f"Failed to save snapshot index: {e}")
 
@@ -184,10 +192,11 @@ class SnapshotManager:
         snapshot_type: SnapshotType = SnapshotType.FULL,
         parent_id: Optional[str] = None
     ) -> str:
-        """
-        Create a snapshot of the given paths.
-        Returns snapshot ID.
-        """
+        """Create a snapshot of the given paths. Returns snapshot ID."""
+        if snapshot_type is SnapshotType.INCREMENTAL:
+            # Honest fail-closed: incrementals were silently FULL snapshots.
+            raise NotImplementedError(
+                "Incremental snapshots are not implemented; use FULL/AUTO.")
         with self._lock:
             import uuid
             snapshot_id = f"snap-{uuid.uuid4().hex[:12]}"
@@ -196,7 +205,6 @@ class SnapshotManager:
             try:
                 file_count = 0
                 total_size = 0
-                checksum = hashlib.sha256()
 
                 with tarfile.open(snapshot_file, "w:gz") as tar:
                     for path_str in paths:
@@ -208,17 +216,18 @@ class SnapshotManager:
                             tar.add(str(path), arcname=path.name)
                             file_count += 1
                             total_size += path.stat().st_size
-                            checksum.update(path.read_bytes())
                         elif path.is_dir():
                             for item in path.rglob("*"):
-                                if item.is_file():
+                                if item.is_file() and not item.is_symlink():
                                     tar.add(str(item), arcname=str(item.relative_to(path.parent)))
                                     file_count += 1
                                     total_size += item.stat().st_size
-                                    checksum.update(item.read_bytes())
 
                 actual_size = snapshot_file.stat().st_size
-                checksum_hex = checksum.hexdigest()
+                # H6 fix: checksum must be of the STORED ARTIFACT so restores
+                # can verify it. Hashing the source files proves nothing about
+                # the bytes on disk that we will later restore from.
+                checksum_hex = self._hash_file(snapshot_file)
 
                 snapshot = Snapshot(
                     id=snapshot_id,
@@ -313,21 +322,49 @@ class SnapshotManager:
                 self.stats.failed_restores += 1
                 return False
 
+    @staticmethod
+    def _hash_file(path: Path, chunk: int = 1024 * 1024) -> str:
+        """Stream-hash a file (SHA-256) without loading it fully."""
+        h = hashlib.sha256()
+        with open(path, "rb") as f:
+            while True:
+                block = f.read(chunk)
+                if not block:
+                    break
+                h.update(block)
+        return h.hexdigest()
+
     def _verify_snapshot(self, snapshot_id: str) -> bool:
-        """Verify snapshot integrity"""
+        """Verify REAL integrity: stored-artifact checksum + valid tar.
+
+        Previously this only checked the tar could be opened and logged a
+        warning on member-count mismatch before returning True — a corrupted
+        restore sailed through the DR gate unchecked.
+        """
         snapshot_file = self.storage_path / f"{snapshot_id}.tar.gz"
         snapshot = self.snapshots[snapshot_id]
 
         try:
+            actual = self._hash_file(snapshot_file)
+            if snapshot.checksum and actual != snapshot.checksum:
+                logger.error(
+                    f"Snapshot {snapshot_id} CHECKSUM MISMATCH "
+                    f"(stored={snapshot.checksum[:16]}..., actual={actual[:16]}...)"
+                )
+                snapshot.status = SnapshotStatus.CORRUPTED
+                self._save_index()
+                return False
             with tarfile.open(snapshot_file, "r:gz") as tar:
-                # Basic check: file opens and is valid tar
                 members = tar.getmembers()
-                if len(members) != snapshot.file_count:
-                    logger.warning(
-                        f"Snapshot {snapshot_id} member count mismatch: "
-                        f"expected {snapshot.file_count}, got {len(members)}"
-                    )
-                return True
+            if len(members) != snapshot.file_count:
+                logger.error(
+                    f"Snapshot {snapshot_id} member count mismatch: "
+                    f"expected {snapshot.file_count}, got {len(members)}"
+                )
+                snapshot.status = SnapshotStatus.CORRUPTED
+                self._save_index()
+                return False
+            return True
         except (tarfile.TarError, OSError) as e:
             logger.error(f"Snapshot {snapshot_id} corrupted: {e}")
             snapshot.status = SnapshotStatus.CORRUPTED
@@ -390,13 +427,15 @@ class SnapshotManager:
         logger.info(f"Pruned {to_remove} old snapshots")
 
 
-# Module-level singleton
+# Module-level singleton (thread-safe)
 _default_manager: Optional[SnapshotManager] = None
+_singleton_lock = threading.Lock()
 
 
 def get_snapshot_manager() -> SnapshotManager:
-    """Get or create the default snapshot manager"""
+    """Get or create the default snapshot manager."""
     global _default_manager
-    if _default_manager is None:
-        _default_manager = SnapshotManager()
-    return _default_manager
+    with _singleton_lock:
+        if _default_manager is None:
+            _default_manager = SnapshotManager()
+        return _default_manager

@@ -3,11 +3,19 @@ E2E Test: Vault Integration
 Tests that the vault server and client work together correctly.
 """
 import pytest
+
+# vault_client.py was intentionally removed in a88175e ("keep swarm core only").
+# These e2e tests target that deleted module; skip cleanly instead of
+# poisoning every collection run with an ImportError.
+pytest.importorskip(
+    "vault_client",
+    reason="vault_client.py removed in a88175e; restore module to re-enable")
+
 import time
 import subprocess
 import requests
 import json
-from vault_client import get_vault_client
+from vault_client import get_vault_client  # noqa: E402
 
 
 class TestVaultIntegration:

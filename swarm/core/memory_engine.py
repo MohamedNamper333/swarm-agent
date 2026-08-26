@@ -234,18 +234,16 @@ class MemoryEngine:
     # === MEILISEARCH INTEGRATION ===
 
     def index_to_meilisearch(self):
-        """Index all memory to Meilisearch (if available)."""
-        if not self.meilisearch_enabled:
-            return False
-        # Would index all layers to Meilisearch
-        return True
+        """Index all memory to Meilisearch. NOT IMPLEMENTED."""
+        raise NotImplementedError(
+            "Meilisearch indexing is not implemented here; "
+            "swarm.memory.v2.search.MeilisearchAdapter is the real path.")
 
     def search_meilisearch(self, query: str, layer: MemoryLayer = None, limit: int = 10) -> List[Dict]:
-        """Search Meilisearch for memory entries."""
-        if not self.meilisearch_enabled:
-            return []
-        # Would search Meilisearch
-        return []
+        """Search Meilisearch. NOT IMPLEMENTED."""
+        raise NotImplementedError(
+            "Meilisearch search is not implemented here; "
+            "swarm.memory.v2.search.MeilisearchAdapter is the real path.")
 
     # === CONTEXT MANAGEMENT ===
 
@@ -284,20 +282,22 @@ class MemoryEngine:
         return context
 
     # === PERSISTENCE ===
+    #
+    # 2026-08-25 institutional audit: these were silent stubs returning True
+    # ("saved!") without writing anything — a false durability guarantee.
+    # They now fail loudly so callers never assume data survived.
 
     def save_to_vault(self, namespace: str = "swarm/memory"):
-        """Save memory to vault."""
-        if not self.vault_client:
-            return False
-        # Would serialize and write to vault
-        return True
+        """Persist memory to the vault. NOT IMPLEMENTED."""
+        raise NotImplementedError(
+            "MemoryEngine vault persistence is not implemented; "
+            "use swarm.memory.v2 (Redis-backed) for durable storage.")
 
     def load_from_vault(self, namespace: str = "swarm/memory"):
-        """Load memory from vault."""
-        if not self.vault_client:
-            return False
-        # Would read and deserialize from vault
-        return True
+        """Load memory from the vault. NOT IMPLEMENTED."""
+        raise NotImplementedError(
+            "MemoryEngine vault loading is not implemented; "
+            "use swarm.memory.v2 (Redis-backed) for durable storage.")
 
     # === STATISTICS ===
 

@@ -45,9 +45,12 @@ class ModelRegistry:
     # Default model configurations matching opencode.json
     DEFAULT_MODELS = {
         "innovator": [
-            ModelConfig("deepseek-v4-flash", "opencode", "opencode/deepseek-v4-flash-free", 1,
+            # NOTE (2026-08-25): deepseek-v4-flash-free upstream unavailable,
+            # ling-3-0-flash-free removed from OpenCode Zen. Replaced with
+            # nemotron-3.5-lightning-free (live-tested OK).
+            ModelConfig("nemotron-3.5-lightning", "opencode", "opencode/nemotron-3.5-lightning-free", 1,
                        ["creativity", "reasoning", "coding"]),
-            ModelConfig("ling-flash", "opencode", "opencode/ling-3-0-flash-free", 2,
+            ModelConfig("tencent-hy3", "opencode", "opencode/tencent-hy3-free", 2,
                        ["fast_reasoning"]),
         ],
         "critic": [
@@ -78,8 +81,8 @@ class ModelRegistry:
             ModelConfig("laguna-s-2-1", "opencode", "opencode/laguna-s-2-1-free", 1,
                        ["general", "diverse_tasks"]),
         ],
-        "ling-3-0-flash": [
-            ModelConfig("ling-3-0-flash", "opencode", "opencode/ling-3-0-flash-free", 1,
+        "nemotron-3.5-lightning": [
+            ModelConfig("nemotron-3.5-lightning", "opencode", "opencode/nemotron-3.5-lightning-free", 1,
                        ["fast_reasoning"]),
         ],
         "swarm-worker-qa": [

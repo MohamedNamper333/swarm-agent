@@ -100,6 +100,17 @@ class StateStore(ABC):
     @abstractmethod
     def delete(self, key: str) -> bool:
         pass
+
+    def set_if_absent(self, key: str, value: Any,
+                      ttl_seconds: Optional[int] = None) -> bool:
+        """Atomic SET-NX. Default: CAS against a sentinel-absent marker.
+
+        Stores MAY override with a native implementation (Redis SET NX EX).
+        """
+        if self.exists(key):
+            return False
+        self.set(key, value, ttl_seconds)
+        return True
     
     @abstractmethod
     def exists(self, key: str) -> bool:
@@ -160,6 +171,23 @@ class InMemoryStateStore(StateStore):
             self._data[key] = entry
             return entry
     
+    def set_if_absent(self, key: str, value: Any,
+                      ttl_seconds: Optional[int] = None) -> bool:
+        """True SET-NX under the store lock (atomic)."""
+        with self._lock:
+            entry = self._data.get(key)
+            if (entry is not None
+                    and entry.value is not None
+                    and not entry.is_expired()):
+                return False
+            expires_at = (datetime.now(timezone.utc)
+                          + timedelta(seconds=ttl_seconds)) if ttl_seconds else None
+            self._data[key] = StateEntry(
+                key=key, value=value, timestamp=now_utc(),
+                expires_at=expires_at,
+            )
+            return True
+
     def delete(self, key: str) -> bool:
         with self._lock:
             if key in self._data:
@@ -298,6 +326,10 @@ class StateManager:
     
     def compare_and_set(self, key: str, expected: Any, new_value: Any) -> bool:
         return self.store.compare_and_set(key, expected, new_value)
+
+    def set_if_absent(self, key: str, value: Any,
+                      ttl_seconds: Optional[int] = None) -> bool:
+        return self.store.set_if_absent(key, value, ttl_seconds)
     
     def get_multi(self, keys: List[str]) -> Dict[str, Any]:
         entries = self.store.get_multi(keys)
@@ -376,17 +408,28 @@ class StateManager:
     ) -> bool:
         lock_key = f"lock:{lock_key}"
         start = time.time()
-        
+
+        # FIX: previous implementation used CAS(None->owner) which can NEVER
+        # succeed on a fresh key (entry doesn't exist), so every first
+        # acquisition spun until timeout. Use true SET-NX with TTL.
+        owner_key = f"{lock_key}:owner"
         while time.time() - start < timeout:
-            if self.store.compare_and_set(f"{lock_key}:owner", None, owner):
-                self.store.set(f"{lock_key}:owner", owner, ttl_seconds)
+            if self.store.set_if_absent(owner_key, owner, ttl_seconds):
                 return True
-            time.sleep(0.1)
-        
+            # Bail early if an unexpired lock is held by nobody valid? Keep
+            # simple spin; TTL guarantees liveness.
+            time.sleep(0.05)
+
         return False
     
     def release_lock(self, lock_key: str, owner: str) -> bool:
-        return self.store.compare_and_set(f"lock:{lock_key}:owner", owner, None)
+        # Delete rather than write None: a None-valued entry would still be
+        # "present" for SET-NX and permanently block re-acquisition.
+        owner_key = f"lock:{lock_key}:owner"
+        entry = self.store.get(owner_key)
+        if entry is not None and getattr(entry, "value", None) == owner:
+            return self.store.delete(owner_key)
+        return False
     
     def is_locked(self, lock_key: str) -> bool:
         return self.store.exists(f"lock:{lock_key}:owner")

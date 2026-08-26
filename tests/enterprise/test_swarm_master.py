@@ -145,7 +145,7 @@ def test_master_get_status():
     assert status["board_agents"] == 5
     assert status["csuite_agents"] == 7
     assert status["department_agents"] >= 31
-    assert status["total_chains"] == 55
+    assert status["total_chains"] == 57
     print("✓ test_master_get_status")
 
 

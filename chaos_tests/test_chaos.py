@@ -7,6 +7,11 @@ import asyncio
 import random
 import time
 import logging
+import uuid
+
+
+def uuidv7() -> str:
+    return str(uuid.uuid4())
 from dataclasses import dataclass, field
 from datetime import datetime, timezone
 from enum import Enum
@@ -59,7 +64,6 @@ class ChaosResult:
     duration_seconds: float
     observations: List[str] = field(default_factory=list)
     metrics: Dict[str, Any] = field(default_factory=dict)
-    success: bool = False
     error: Optional[str] = None
 
 
@@ -368,7 +372,8 @@ def create_standard_experiments() -> List[ChaosExperiment]:
             expected_behavior="Lock expiration issues, lease renewal fails",
             success_criteria="Lease renewal handles drift, no split-brain",
         ),
-    return [exp for exp in experiments]
+    ]
+    return experiments
 
 
 # =============================================================================

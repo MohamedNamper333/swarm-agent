@@ -499,22 +499,65 @@ class SeccompFilter:
     }
     
     @staticmethod
-    def install_filter(filter_config: Optional[Dict] = None) -> bool:
-        """Install seccomp filter using libseccomp if available."""
+    def install_filter(filter_config: Optional[Dict] = None,
+                       allow_network: bool = False) -> bool:
+        """Install a RESTRICTIVE seccomp filter (fail-closed).
+
+        Defaults to the restricted profile with the escape toolkit stripped.
+        Returns False on ANY failure — callers MUST treat that as fatal.
+        """
+        if filter_config is None:
+            filter_config = SeccompFilter.restricted_profile(allow_network)
         try:
             import seccomp
-            filter_config = filter_config or SeccompFilter.DEFAULT_FILTER
             filter_obj = seccomp.SyscallFilter(defaction=seccomp.KILL)
             for syscall in filter_config["syscalls"]:
                 filter_obj.add_rule(seccomp.ALLOW, syscall["name"])
             filter_obj.load()
             return True
         except ImportError:
-            logger.warning("libseccomp not available, seccomp filter not installed")
+            logger.error("libseccomp unavailable; refusing to run without seccomp")
             return False
         except Exception as e:
             logger.error(f"Failed to install seccomp filter: {e}")
             return False
+
+    # Syscalls that enable sandbox escape / privilege escalation and are
+    # NEVER needed by sandboxed user code.
+    _DANGEROUS_SYSCALLS = frozenset({
+        "ptrace", "pivot_root", "mknod", "personality", "modify_ldt",
+        "uselib", "vhangup", "_sysctl", "syslog", "lookup_dcookie",
+        "perf_event_open", "fanotify_init", "fanotify_mark", "move_pages",
+        "remap_file_pages", "name_to_handle_at", "create_module",
+        "setuid", "setgid", "setreuid", "setregid", "setresuid",
+        "setresgid", "setfsuid", "setfsgid", "setgroups", "capset",
+        "iopl", "ioperm", "swapon", "swapoff", "quotactl", "acct",
+        "reboot", "kexec_load", "open_by_handle_at",
+    })
+
+    _NETWORK_SYSCALLS = frozenset({
+        "socket", "connect", "accept", "accept4", "sendto", "recvfrom",
+        "sendmsg", "recvmsg", "recvmmsg", "bind", "listen",
+        "getsockname", "getpeername", "setsockopt", "getsockopt", "shutdown",
+    })
+
+    @classmethod
+    def restricted_profile(cls, allow_network: bool = False) -> Dict:
+        """Build a restrictive profile: default KILL, dangerous syscalls
+        stripped, network syscalls only when explicitly allowed."""
+        names = set()
+        for entry in cls.DEFAULT_FILTER["syscalls"]:
+            n = entry["name"]
+            if n in cls._DANGEROUS_SYSCALLS:
+                continue
+            if not allow_network and n in cls._NETWORK_SYSCALLS:
+                continue
+            names.add(n)
+        return {
+            "default_action": "SCMP_ACT_KILL",
+            "syscalls": [{"name": n, "action": "SCMP_ACT_ALLOW"}
+                         for n in sorted(names)],
+        }
 
 
 # =============================================================================
@@ -655,14 +698,22 @@ class LocalProcessSandbox(SandboxBackend):
         try:
             # Use secure temporary directory
             with tempfile.TemporaryDirectory(
-                dir="/run/user/1000" if os.path.exists("/run/user/1000") else None,
+                dir="/tmp",  # must be reachable by the sandboxed uid
                 prefix=f"exec-{request.request_id}-"
-            ) as tmpdir:
+            ) as _tdir:
+                os.chmod(_tdir, 0o755)
+                tmpdir = _tdir
                 # Write code file
                 code_file = self._write_code_file(tmpdir, request)
-                
-                # Write input files
+
+                # Write input files (traversal-guarded, same as isolated path)
                 for filename, content in request.files.items():
+                    if (Path(filename).is_absolute()
+                            or ".." in Path(filename).parts):
+                        result.status = ExecutionStatus.ERROR
+                        result.error_message = f"Illegal file path: {filename!r}"
+                        result.error_type = "PathTraversal"
+                        return result
                     filepath = Path(tmpdir) / filename
                     filepath.parent.mkdir(parents=True, exist_ok=True)
                     filepath.write_text(content)
@@ -698,19 +749,55 @@ class LocalProcessSandbox(SandboxBackend):
     
 
     def _collect_output_files(self, tmpdir: str) -> Dict[str, str]:
-        """Collect files created during execution."""
-        output_files = {}
-        tmpdir_path = Path(tmpdir)
+        """Collect files created during execution.
+
+        Symlink-safe (2026-08-25): symlinks are skipped entirely and files
+        are opened O_NOFOLLOW to defeat TOCTOU swaps pointing at host files
+        (e.g. /etc/shadow). Size is taken from lstat BEFORE reading.
+        """
+        import stat as _stat
+        output_files: Dict[str, str] = {}
+        max_file = 1024 * 1024          # 1MB per file
+        total_budget = 16 * 1024 * 1024  # 16MB across all outputs
+        collected = 0
+
+        tmp_root = Path(tmpdir).resolve()
+        main_py = tmp_root / "main.py"
         try:
-            for filepath in tmpdir_path.rglob("*"):
-                if filepath.is_file() and filepath != Path(tmpdir) / "main.py":
-                    rel_path = filepath.relative_to(tmpdir_path)
+            for dirpath, dirnames, filenames in os.walk(tmp_root):
+                # Never descend into symlinked directories.
+                safe_dirs = []
+                for d in dirnames:
+                    full = Path(dirpath) / d
+                    if not full.is_symlink():
+                        safe_dirs.append(d)
+                dirnames[:] = safe_dirs
+
+                for name in filenames:
+                    filepath = Path(dirpath) / name
+                    if filepath == main_py or filepath.is_symlink():
+                        continue
                     try:
-                        content = filepath.read_text()
-                        if len(content) < 1024 * 1024:  # Max 1MB per file
-                            output_files[str(rel_path)] = content
+                        st = os.lstat(filepath)
+                        if not _stat.S_ISREG(st.st_mode):
+                            continue
+                        if st.st_size > max_file or collected + st.st_size > total_budget:
+                            continue
+                        fd = os.open(filepath, os.O_RDONLY | getattr(os, "O_NOFOLLOW", 0))
+                        try:
+                            # Re-stat via fd to close the TOCTOU window.
+                            fst = os.fstat(fd)
+                            if not _stat.S_ISREG(fst.st_mode) or fst.st_size > max_file:
+                                continue
+                            content = os.read(fd, max_file)
+                        finally:
+                            os.close(fd)
+                        rel_path = filepath.relative_to(tmp_root)
+                        output_files[str(rel_path)] = content.decode(
+                            "utf-8", errors="replace")
+                        collected += len(content)
                     except Exception:
-                        pass
+                        continue
         except Exception:
             pass
         return output_files
@@ -771,19 +858,20 @@ class LocalProcessSandbox(SandboxBackend):
         elif request.language == Language.BASH:
             return ["bash", code_file]
         elif request.language == Language.GO:
-            binary_path = f"/tmp/{Path(code_file).stem}"
-            return ["sh", "-c", f"go build -o {binary_path} {code_file} && {binary_path}"]
+            # Binary lives in the per-execution tmpdir — never shared /tmp.
+            binary_path = code_file.replace(Path(code_file).suffix, "")
+            return ["sh", "-c", f"go build -o '{binary_path}' '{code_file}' && exec '{binary_path}'"]
         elif request.language == Language.RUST:
-            binary_path = f"/tmp/{Path(code_file).stem}"
-            return ["sh", "-c", f"rustc -o {binary_path} {code_file} && {binary_path}"]
+            binary_path = code_file.replace(Path(code_file).suffix, "")
+            return ["sh", "-c", f"rustc -o '{binary_path}' '{code_file}' && exec '{binary_path}'"]
         elif request.language == Language.JAVA:
             class_name = Path(code_file).stem
             return ["sh", "-c", f"cd {Path(code_file).parent} && javac {Path(code_file).name} && java {class_name}"]
         elif request.language == Language.CSHARP:
             return ["dotnet", "script", code_file]
         elif request.language == Language.CPP:
-            binary_path = f"/tmp/{Path(code_file).stem}"
-            return ["sh", "-c", f"g++ -o {binary_path} {code_file} && {binary_path}"]
+            binary_path = code_file.replace(Path(code_file).suffix, "")
+            return ["sh", "-c", f"g++ -o '{binary_path}' '{code_file}' && exec '{binary_path}'"]
         else:
             return ["cat", code_file]
     
@@ -797,67 +885,107 @@ class LocalProcessSandbox(SandboxBackend):
     ) -> ExecutionResult:
         """Run command with full isolation (namespaces, seccomp, cgroups, resource limits)."""
 
-        # Prepare environment
-        env = os.environ.copy()
-        env.update(request.environment)
-
-        # Create child process with isolation
-        def preexec_fn():
-            """Setup isolation in child process before exec."""
+        # Create child process with isolation.
+        # FAIL-CLOSED (2026-08-25): any isolation failure kills the child
+        # immediately. The previous version swallowed every error with
+        # except:pass, silently running unisolated code as root.
+        def _die(msg: str):
+            import sys as _sys
             try:
-                # 1. Create new namespaces
-                if self.enable_namespaces:
-                    namespace_flags = (
-                        CLONE_NEWNS | CLONE_NEWUTS | CLONE_NEWIPC | CLONE_NEWPID
-                    )
-                    if not request.network_allowed:
-                        namespace_flags |= CLONE_NEWNET
-                    if not request.filesystem_allowed:
-                        namespace_flags |= CLONE_NEWNS
-
-                    namespace_flags |= CLONE_NEWUSER
-
-                    libc = ctypes.CDLL(ctypes.util.find_library("c"), use_errno=True)
-                    if libc.unshare(namespace_flags) != 0:
-                        raise OSError(f"unshare failed: {os.strerror(ctypes.get_errno())}")
-
-                    try:
-                        with open("/proc/self/uid_map", "w") as f:
-                            f.write(f"0 {os.getuid()} 1\n")
-                        with open("/proc/self/gid_map", "w") as f:
-                            f.write(f"0 {os.getgid()} 1\n")
-                        with open("/proc/self/setgroups", "w") as f:
-                            f.write("deny\n")
-                    except Exception:
-                        pass
-
-                    if not request.network_allowed:
-                        subprocess.run(["ip", "link", "set", "lo", "up"], capture_output=True)
-                        subprocess.run(["ip", "link", "set", "eth0", "down"], capture_output=True)
-
-                if self.enable_seccomp:
-                    SeccompFilter.install_filter()
-
-                resource.setrlimit(resource.RLIMIT_CPU, (request.max_cpu_seconds, request.max_cpu_seconds + 1))
-                mem_bytes = request.max_memory_mb * 1024 * 1024
-                resource.setrlimit(resource.RLIMIT_AS, (mem_bytes, mem_bytes))
-                resource.setrlimit(resource.RLIMIT_FSIZE, (request.max_output_size_mb * 1024 * 1024, request.max_output_size_mb * 1024 * 1024))
-                resource.setrlimit(resource.RLIMIT_NPROC, (request.max_processes, request.max_processes))
-                resource.setrlimit(resource.RLIMIT_CORE, (0, 0))
-                resource.setrlimit(resource.RLIMIT_NOFILE, (1024, 1024))
-
-                try:
-                    os.setgroups([])
-                    os.setgid(65534)
-                    os.setuid(65534)
-                except Exception:
-                    pass
-
-                LinuxCapabilities.drop_specific_caps([CAP_DAC_OVERRIDE])
+                os.write(2, f"[sandbox] FATAL: {msg}\n".encode())
             except Exception:
                 pass
-            finally:
-                pass
+            os._exit(126)
+
+        # Real host uid/gid captured BEFORE fork: after unshare(CLONE_NEWUSER)
+        # and before the map is written, getuid() reads as overflow (65534),
+        # so the map must reference the parent's true ids.
+        _host_uid = os.getuid()
+        _host_gid = os.getgid()
+
+        def preexec_fn():
+            """Setup isolation in child before exec; abort on ANY failure."""
+
+            # 1. Namespaces FIRST: CLONE_NEWUSER makes this process root
+            #    *inside* the new user namespace, which grants CAP_SETUID to
+            #    complete the privilege drop even when the parent was an
+            #    ordinary user.
+            in_user_ns = False
+            if self.enable_namespaces:
+                namespace_flags = (
+                    CLONE_NEWNS | CLONE_NEWUTS | CLONE_NEWIPC | CLONE_NEWPID
+                    | CLONE_NEWUSER
+                )
+                if not request.network_allowed:
+                    namespace_flags |= CLONE_NEWNET
+                libc = ctypes.CDLL(ctypes.util.find_library("c"), use_errno=True)
+                if libc.unshare(namespace_flags) != 0:
+                    _die(f"unshare failed: {os.strerror(ctypes.get_errno())}")
+                try:
+                    with open("/proc/self/setgroups", "w") as f:
+                        f.write("deny\n")
+                    # Unprivileged processes may only write a SINGLE-id map
+                    # covering their own host uid/gid (multi-line maps need
+                    # CAP_SETUID in the parent namespace).
+                    with open("/proc/self/uid_map", "w") as f:
+                        f.write(f"0 {_host_uid} 1\n")
+                    with open("/proc/self/gid_map", "w") as f:
+                        f.write(f"0 {_host_gid} 1\n")
+                    in_user_ns = True   # ns-root -> host uid; full caps INSIDE ns only
+                except OSError as e:
+                    _die(f"uid_map/gid_map write failed: {e}")
+                # Inside a fresh netns only loopback exists; bring it up so
+                # localhost works but there is NO route to the host network.
+                if not request.network_allowed:
+                    subprocess.run(["ip", "link", "set", "lo", "up"],
+                                   capture_output=True)
+
+            # 2. Privilege drop.
+            # Inside a 1:1-mapped user namespace only the mapped id exists,
+            # so uid 65534 is unreachable there; namespace+seccomp+rlimits
+            # carry the isolation instead. As REAL root we MUST drop.
+            try:
+                os.setgroups([])
+            except PermissionError:
+                pass  # denied by setgroups:deny inside userns — expected
+            if not in_user_ns and os.geteuid() == 0:
+                try:
+                    os.setgid(65534)
+                    os.setuid(65534)
+                except OSError as e:
+                    _die(f"setuid/setgid(nobody) failed: {e}")
+            elif not in_user_ns and os.geteuid() != 0:
+                logger.warning(
+                    "Sandbox running WITHOUT privilege drop (unprivileged "
+                    "parent, no user namespace): code shares this account's "
+                    "file access. For production use the gVisor/Firecracker "
+                    "backends or run under a dedicated low-privilege user.")
+
+            # 3. Seccomp (mandatory when enabled — no silent skip)
+            if self.enable_seccomp:
+                if not SeccompFilter.install_filter(
+                        allow_network=bool(request.network_allowed)):
+                    _die("seccomp filter installation failed")
+
+            # 4. Resource limits
+            try:
+                resource.setrlimit(resource.RLIMIT_CPU,
+                                   (request.max_cpu_seconds, request.max_cpu_seconds + 1))
+                mem_bytes = request.max_memory_mb * 1024 * 1024
+                resource.setrlimit(resource.RLIMIT_AS, (mem_bytes, mem_bytes))
+                resource.setrlimit(
+                    resource.RLIMIT_FSIZE,
+                    (request.max_output_size_mb * 1024 * 1024,) * 2)
+                resource.setrlimit(resource.RLIMIT_NPROC,
+                                   (request.max_processes, request.max_processes))
+                resource.setrlimit(resource.RLIMIT_CORE, (0, 0))
+                resource.setrlimit(resource.RLIMIT_NOFILE, (1024, 1024))
+            except ValueError as e:
+                # Some rlimits can exceed compiled limits; non-fatal but logged.
+                logger.warning("rlimit adjust skipped: %s", e)
+
+            # 5. Drop all capabilities (best-effort; uid drop already removed most)
+            LinuxCapabilities.drop_all_caps()
 
         cgroup_path = None
         if self.enable_cgroups:
@@ -867,14 +995,33 @@ class LocalProcessSandbox(SandboxBackend):
             self._cgroup_manager.set_cpu_limit(cgroup_path, 100.0)
             self._cgroup_manager.set_pids_limit(cgroup_path, request.max_processes)
 
+        # Sandbox workdir MUST be accessible to the dropped user (nobody,
+        # uid 65534). /run/user/<uid> is owner-only — after dropping
+        # privileges the child could not even chdir into it (fail-closed
+        # exposed this). Use per-execution dir in /tmp with open perms.
         with tempfile.TemporaryDirectory(
-            dir="/run/user/1000" if os.path.exists("/run/user/1000") else "/tmp",
+            dir="/tmp",
             prefix=f"exec-{request.request_id}-"
-        ) as tmpdir:
+        ) as _tdir:
+            os.chmod(_tdir, 0o755)  # traversable+readable by 'nobody'; not writable-by-all
+            tmpdir = _tdir
             code_file = self._write_code_file(tmpdir, request)
 
             for filename, content in request.files.items():
-                filepath = Path(tmpdir) / filename
+                # S4 hardening: reject traversal/absolute paths before write.
+                if (Path(filename).is_absolute()
+                        or ".." in Path(filename).parts
+                        or str(filename).strip() in ("", ".", "/")):
+                    result.status = ExecutionStatus.ERROR
+                    result.error_message = f"Illegal file path in request.files: {filename!r}"
+                    result.error_type = "PathTraversal"
+                    return result
+                filepath = (Path(tmpdir) / filename).resolve()
+                if not str(filepath).startswith(str(Path(tmpdir).resolve())):
+                    result.status = ExecutionStatus.ERROR
+                    result.error_message = f"File path escapes sandbox: {filename!r}"
+                    result.error_type = "PathTraversal"
+                    return result
                 filepath.parent.mkdir(parents=True, exist_ok=True)
                 filepath.write_text(content)
 

@@ -17,6 +17,7 @@ from collections import defaultdict
 import fnmatch
 import re
 import json
+import threading
 
 logger = logging.getLogger(__name__)
 
@@ -543,11 +544,14 @@ class RoleManager:
         self._roles: Dict[str, Role] = {}
         self._assignments: Dict[str, List[RoleAssignment]] = defaultdict(list)  # subject_id -> assignments
         self._role_hierarchy: Dict[str, Set[str]] = defaultdict(set)  # role -> implied roles
-        self._lock = asyncio.Lock()
+        # Thread lock (bodies are pure-sync): makes BOTH async callers and
+        # check_permission_sync share one serialization without asyncio.run
+        # hacks or loop-affinity problems.
+        self._lock = threading.RLock()
 
     async def create_role(self, role: Role) -> Role:
         """Create a new role."""
-        async with self._lock:
+        with self._lock:
             if role.role_id in self._roles:
                 raise ValueError(f"Role {role.role_id} already exists")
             self._roles[role.role_id] = role
@@ -557,11 +561,11 @@ class RoleManager:
             return role
 
     async def get_role(self, role_id: str) -> Optional[Role]:
-        async with self._lock:
+        with self._lock:
             return self._roles.get(role_id)
 
     async def update_role(self, role_id: str, updates: Dict[str, Any]) -> Optional[Role]:
-        async with self._lock:
+        with self._lock:
             role = self._roles.get(role_id)
             if not role:
                 return None
@@ -577,7 +581,7 @@ class RoleManager:
             return role
 
     async def delete_role(self, role_id: str) -> bool:
-        async with self._lock:
+        with self._lock:
             if role_id in self._roles:
                 del self._roles[role_id]
                 # Remove from hierarchy
@@ -602,10 +606,22 @@ class RoleManager:
         conditions: Optional[List[Dict[str, Any]]] = None,
     ) -> RoleAssignment:
         """Assign a role to a subject."""
-        async with self._lock:
+        with self._lock:
             role = self._roles.get(role_id)
             if not role:
                 raise ValueError(f"Role {role_id} not found")
+
+            for existing in self._assignments.get(subject_id, []):
+                if existing.role_id == role_id and existing.tenant_id == tenant_id:
+                    exp = getattr(existing, "expires_at", None)
+                    live = exp is None or (
+                        (exp if exp.tzinfo else exp.replace(tzinfo=timezone.utc))
+                        > datetime.now(timezone.utc)
+                    )
+                    if live:
+                        raise ValueError(
+                            f"Subject {subject_id} already holds live "
+                            f"assignment of {role_id} in {tenant_id}")
 
             assignment = RoleAssignment(
                 subject_id=subject_id,
@@ -621,7 +637,7 @@ class RoleManager:
 
     async def revoke_role(self, subject_id: str, role_id: str) -> bool:
         """Revoke a role from a subject."""
-        async with self._lock:
+        with self._lock:
             if subject_id in self._assignments:
                 original_len = len(self._assignments[subject_id])
                 self._assignments[subject_id] = [
@@ -632,9 +648,19 @@ class RoleManager:
             return False
 
     async def get_subject_roles(self, subject_id: str, tenant_id: str = "default") -> List[Role]:
-        """Get all roles for a subject (including implied)."""
-        async with self._lock:
-            assignments = self._assignments.get(subject_id, [])
+        """Get all live roles for a subject (including implied).
+
+        RB-N9 fix: tenant filter was accepted but IGNORED — roles from any
+        other tenant applied. Now only matching-tenant, non-expired
+        assignments count.
+        """
+        now = datetime.now(timezone.utc)
+        with self._lock:
+            assignments = [
+                a for a in self._assignments.get(subject_id, [])
+                if a.tenant_id == tenant_id
+                and self._assignment_live(a, now)
+            ]
             roles = []
             seen = set()
             
@@ -669,37 +695,44 @@ class RoleManager:
         permissions = await self.get_effective_permissions(subject_id)
         return permission in permissions
 
-    def check_permission_sync(self, subject_id: str, permission: str) -> bool:
-        """Check if subject has a specific permission (sync version - backward compatibility)."""
-        # Use the cached async method properly - create event loop if needed
-        try:
-            loop = asyncio.get_event_loop()
-            if loop.is_running():
-                # If loop is running, we can't use run_until_complete
-                # Fall back to sync check via direct role traversal
-                return self._check_permission_sync(subject_id, permission)
-            else:
-                permissions = loop.run_until_complete(self.get_effective_permissions(subject_id))
-                return permission in permissions
-        except RuntimeError:
-            # No event loop, create one
-            permissions = asyncio.run(self.get_effective_permissions(subject_id))
-            return permission in permissions
+    @staticmethod
+    def _assignment_live(assignment: "RoleAssignment", now) -> bool:
+        """An expired assignment grants NOTHING (was never checked before)."""
+        exp = getattr(assignment, "expires_at", None)
+        if exp is None:
+            return True
+        if exp.tzinfo is None:
+            exp = exp.replace(tzinfo=timezone.utc)
+        return now < exp
 
-    def _check_permission_sync(self, subject_id: str, permission: str) -> bool:
-        """Synchronous permission check without async calls."""
-        # Direct role traversal without async
-        assignments = self._assignments.get(subject_id, [])
-        for assignment in assignments:
-            role = self._roles.get(assignment.role_id)
-            if role and role.enabled and permission in role.permissions:
-                return True
-            # Check implied roles
-            if role and role.enabled:
-                implied = self._role_hierarchy.get(assignment.role_id, set())
-                for implied_role_id in implied:
-                    implied_role = self._roles.get(implied_role_id)
-                    if implied_role and implied_role.enabled and permission in implied_role.permissions:
+    def check_permission_sync(
+        self,
+        subject_id: str,
+        permission: str,
+        tenant_id: Optional[str] = None,
+    ) -> bool:
+        """Loop-safe synchronous permission check (RB-N3 fix).
+
+        Never touches asyncio. Honors expiry and, when tenant_id is given,
+        scopes to that tenant (RB-N9).
+        """
+        now = datetime.now(timezone.utc)
+        with self._lock:
+            assignments = self._assignments.get(subject_id, [])
+            for assignment in assignments:
+                if tenant_id is not None and assignment.tenant_id != tenant_id:
+                    continue
+                if not self._assignment_live(assignment, now):
+                    continue
+                role = self._roles.get(assignment.role_id)
+                if not role or not role.enabled:
+                    continue
+                if permission in role.permissions:
+                    return True
+                for implied_id in self._role_hierarchy.get(assignment.role_id, ()):
+                    implied_role = self._roles.get(implied_id)
+                    if implied_role and implied_role.enabled \
+                            and permission in implied_role.permissions:
                         return True
         return False
 
@@ -771,39 +804,57 @@ class PolicyDecisionPoint:
         self._cache_lock = asyncio.Lock()
 
     def _generate_cache_key(self, context: EvaluationContext) -> str:
-        """Generate deterministic cache key from context."""
+        """Deterministic cache key covering IDs *and* attributes.
+
+        RB-N5 fix: the old key used only subject/resource/action/tenant IDs,
+        so two requests with identical IDs but different attributes (e.g.
+        different resource owner, different environment flags) shared one
+        cached decision — a privilege-escalation vector. Attribute bags are
+        now hashed into the key.
+        """
+        def _bag(*objs) -> str:
+            payload = []
+            for o in objs:
+                data = getattr(o, "attributes", None) or {}
+                try:
+                    payload.append(json.dumps(data, sort_keys=True,
+                                              separators=(",", ":"), default=str))
+                except Exception:
+                    payload.append(repr(data))
+            return hashlib.sha256("|".join(payload).encode()).hexdigest()[:16]
+
         key_parts = [
-            context.subject.subject_id,
-            context.resource.resource_id,
+            context.subject.subject_id, _bag(context.subject),
+            context.resource.resource_id, _bag(context.resource),
             context.action.action_id,
+            context.environment.environment_id if hasattr(
+                context.environment, "environment_id") else "",
+            _bag(getattr(context, "environment", None)),
             context.tenant_id,
         ]
         key_string = "|".join(key_parts)
-        return hashlib.sha256(key_string.encode()).hexdigest()[:32]
+        return hashlib.sha256(key_string.encode()).hexdigest()[:40]
 
     async def decide(self, context: EvaluationContext) -> Decision:
-        """Make authorization decision with caching."""
+        """Make authorization decision with caching (honors cache_ttl)."""
         cache_key = self._generate_cache_key(context)
-        
-        # Check cache
+        ttl = self._cache_ttl  # RB-N6 fix: was hardcoded 300
+
         async with self._cache_lock:
-            if cache_key in self._cache:
-                cached_decision, cached_at = self._cache[cache_key]
-                if (datetime.now(timezone.utc) - cached_at).total_seconds() < 300:
+            hit = self._cache.get(cache_key)
+            if hit is not None:
+                cached_decision, cached_at = hit
+                if (datetime.now(timezone.utc) - cached_at).total_seconds() < ttl:
                     return cached_decision
-        
-        # Evaluate policies
+
         decision = await self.policy_engine.evaluate(context)
-        
-        # Cache decision
+
         async with self._cache_lock:
             self._cache[cache_key] = (decision, datetime.now(timezone.utc))
-            # Simple cache eviction
             if len(self._cache) > 10000:
-                # Remove oldest entries
                 sorted_items = sorted(self._cache.items(), key=lambda x: x[1][1])
                 self._cache = dict(sorted_items[-5000:])
-        
+
         return decision
 
 
@@ -864,8 +915,8 @@ class PolicyAdministrationPoint:
         return self._version_history.get(policy_id, [])
 
     async def deploy_policy_set(self, policy_set_id: str) -> bool:
-        # Implementation for policy set deployment
-        return True
+        raise NotImplementedError(
+            "Policy-set deployment is not implemented; do not fake success.")
 
 
 # =============================================================================
@@ -941,70 +992,89 @@ class FeatureFlag:
 
 
 class FeatureFlagStore:
-    """Manages feature flags with real-time updates."""
+    """Manages feature flags with real-time updates.
+
+    2026-08-25 hardening:
+    - Thread-based RLock (was asyncio.Lock driven by asyncio.run() inside
+      sync methods, which explodes under any running event loop and was
+      the norm in this codebase).
+    - create_flag was defined TWICE; the second definition silently won.
+    - Listeners fire OUTSIDE the lock (a listener calling back into the
+      store previously deadlocked).
+    """
 
     def __init__(self):
         self._flags: Dict[str, FeatureFlag] = {}
-        self._lock = asyncio.Lock()  # FIXED: use asyncio.Lock instead of RLock
+        self._lock = threading.RLock()
         self._listeners: List[Callable[[FeatureFlag, str], None]] = []
 
     def create_flag(self, flag: FeatureFlag) -> FeatureFlag:
-        asyncio.run(self._create_flag_async(flag))
-        return flag
-
-    async def _create_flag_async(self, flag: FeatureFlag) -> None:
-        async with self._lock:
+        """Create or replace a flag (synchronous, loop-safe)."""
+        with self._lock:
             self._flags[flag.flag_id] = flag
-            self._notify_listeners(flag, "created")
-
-    def create_flag(self, flag: FeatureFlag) -> FeatureFlag:
-        """Synchronous wrapper for creating a flag."""
-        asyncio.run(self._create_flag_async(flag))
+            listeners = list(self._listeners)
+        for listener in listeners:
+            try:
+                listener(flag, "created")
+            except Exception as e:
+                logger.error(f"Flag listener error: {e}")
         return flag
 
-    async def get_flag(self, flag_id: str) -> Optional[FeatureFlag]:
-        async with self._lock:
+    def get_flag(self, flag_id: str) -> Optional[FeatureFlag]:
+        with self._lock:
             return self._flags.get(flag_id)
 
-    async def get_flag_by_name(self, name: str) -> Optional[FeatureFlag]:
-        async with self._lock:
+    def get_flag_by_name(self, name: str) -> Optional[FeatureFlag]:
+        with self._lock:
             for flag in self._flags.values():
                 if flag.name == name:
                     return flag
             return None
 
-    async def list_flags(self, enabled_only: bool = True) -> List[FeatureFlag]:
-        async with self._lock:
+    def list_flags(self, enabled_only: bool = True) -> List[FeatureFlag]:
+        with self._lock:
             flags = list(self._flags.values())
             if enabled_only:
                 flags = [f for f in flags if f.enabled]
             return flags
 
-    async def update_flag(self, flag_id: str, updates: Dict[str, Any]) -> Optional[FeatureFlag]:
-        async with self._lock:
+    _FLAG_UPDATABLE = {"name", "description", "enabled", "default_value",
+                       "flag_type", "targeting_rules", "rollout_pct",
+                       "updated_at"}
+
+    def update_flag(self, flag_id: str, updates: Dict[str, Any]) -> Optional[FeatureFlag]:
+        with self._lock:
             flag = self._flags.get(flag_id)
             if not flag:
                 return None
             for key, value in updates.items():
-                if hasattr(flag, key) and key not in ("flag_id", "created_at", "created_by"):
+                if key in ("flag_id", "created_at", "created_by"):
+                    continue  # immutable identity fields
+                if hasattr(flag, key):
                     setattr(flag, key, value)
             flag.updated_at = datetime.now(timezone.utc)
-            self._notify_listeners(flag, "updated")
-            return flag
+            listeners = list(self._listeners)
+        for listener in listeners:
+            try:
+                listener(flag, "updated")
+            except Exception as e:
+                logger.error(f"Flag listener error: {e}")
+        return flag
 
-    async def delete_flag(self, flag_id: str) -> bool:
-        async with self._lock:
+    def delete_flag(self, flag_id: str) -> bool:
+        with self._lock:
             if flag_id in self._flags:
                 del self._flags[flag_id]
                 return True
             return False
 
-    async def evaluate_flag(self, flag_id: str, context: Dict[str, Any]) -> Any:
-        async with self._lock:
+    def evaluate_flag(self, flag_id: str, context: Dict[str, Any]) -> Any:
+        with self._lock:
             flag = self._flags.get(flag_id)
             if not flag:
                 return None
-            return flag.evaluate(context)
+        # Evaluate outside lock; flag.evaluate is deterministic hashing.
+        return flag.evaluate(context)
 
     def add_listener(self, listener: Callable[[FeatureFlag, str], None]) -> None:
         self._listeners.append(listener)

@@ -99,8 +99,21 @@ class AppendEntriesResponse:
 # =============================================================================
 
 class RaftConsensus:
-    """Raft consensus implementation using etcd for coordination."""
-    
+    """Raft consensus implementation using etcd for coordination.
+
+    =========================================================
+    SAFETY GATE (2026-08-25 institutional audit)
+    DISABLED by default. Audit found:
+      (a) heartbeat loop attribute never defined -> leader goes silent
+      (b) undefined `request` variable in append handling -> NameError
+      (c) _persist_state swallows datetime-JSON TypeError -> term/vote/log
+          never persisted -> double-vote after restart => SPLIT BRAIN
+      (d) propose() returns True on timeout => false durability acks
+    A split-brain consensus layer is WORSE than none.
+    Override (at your own risk): SWARM_ENABLE_UNSAFE_RAFT=1
+    =========================================================
+    """
+
     def __init__(
         self,
         member_id: str,
@@ -110,6 +123,13 @@ class RaftConsensus:
         election_timeout_ms: int = 150,
         heartbeat_interval_ms: int = 50,
     ):
+        import os as _os
+        if _os.environ.get("SWARM_ENABLE_UNSAFE_RAFT") != "1":
+            raise RuntimeError(
+                "RaftConsensus is disabled by institutional audit "
+                "(split-brain risk). Fix known defects first and set "
+                "SWARM_ENABLE_UNSAFE_RAFT=1 to override."
+            )
         self.member_id = member_id
         self.cluster_members = {m.member_id: m for m in cluster_members}
         self.etcd_host = etcd_host

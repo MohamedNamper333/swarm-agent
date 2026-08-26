@@ -260,7 +260,7 @@ def test_workflow_master_status_reflects_all():
     # Departments: 31 (مع safety_dept المكرر في الـ depts)
     assert status["department_agents"] >= 31
     # Total chains: 55
-    assert status["total_chains"] == 55
+    assert status["total_chains"] == 57  # registry updated 2026-08-25
     print("✓ test_workflow_master_status_reflects_all")
 
 

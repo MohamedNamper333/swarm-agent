@@ -41,6 +41,7 @@ class BudgetStatus(str, Enum):
     ACTIVE = "active"
     EXCEEDED = "exceeded"
     WARNING = "warning"
+    CRITICAL = "critical"
     EXPIRED = "expired"
     CLOSED = "closed"
 
@@ -182,7 +183,12 @@ class BudgetTransaction:
 
 class BudgetEngine:
     """Core budget management engine."""
-    
+
+    MAX_TRANSACTIONS = 10_000
+    # Statuses that permit new financial movement
+    _OPERABLE = {BudgetStatus.ACTIVE, BudgetStatus.WARNING,
+                 BudgetStatus.CRITICAL}
+
     def __init__(self):
         self._accounts: Dict[str, BudgetAccount] = {}
         self._allocations: Dict[str, BudgetAllocation] = {}
@@ -251,16 +257,29 @@ class BudgetEngine:
             
             return accounts
     
+    # Fields safe to set directly; financial fields must go through their
+    # guarded operations (adjust_limit / spend / transfer).
+    _UPDATABLE_FIELDS = {
+        "name", "description", "tags", "metadata",
+        "warning_threshold", "critical_threshold",
+        "period_start", "period_end", "currency", "status",
+    }
+
     def update_account(self, account_id: str, updates: Dict[str, Any]) -> Optional[BudgetAccount]:
         with self._lock:
             account = self._accounts.get(account_id)
             if not account:
                 return None
-            
+
             for key, value in updates.items():
-                if hasattr(account, key) and key not in ("account_id", "created_at", "created_by"):
+                if key in ("limit",):
+                    raise ValueError(
+                        "Use adjust_limit() to change limit — direct mutation bypasses controls")
+                if key in ("spent", "reserved"):
+                    raise ValueError(f"Field '{key}' is engine-managed and cannot be set")
+                if key in self._UPDATABLE_FIELDS:
                     setattr(account, key, value)
-            
+
             account.updated_at = datetime.now(timezone.utc)
             logger.info(f"Updated budget account: {account_id}")
             return account
@@ -290,7 +309,13 @@ class BudgetEngine:
             account = self._accounts.get(account_id)
             if not account:
                 return None
-            
+            if amount <= 0 or amount != amount or amount == float("inf"):
+                logger.warning(f"allocate rejected: non-positive amount {amount}")
+                return None
+            if account.status not in self._OPERABLE:
+                logger.warning(f"allocate rejected: account {account_id} status={account.status.value}")
+                return None
+
             # Check if account has available budget
             available = account.available
             if amount > available:
@@ -337,15 +362,24 @@ class BudgetEngine:
             account = self._accounts.get(account_id)
             if not account:
                 return False
-            
+            if amount <= 0 or amount != amount or amount == float("inf"):
+                logger.warning(f"spend rejected: non-positive amount {amount}")
+                return False
+            if account.status not in self._OPERABLE:
+                logger.warning(f"spend rejected: account {account_id} status={account.status.value}")
+                return False
+
             # Check if account can afford the spend
             if amount > account.available:
                 logger.warning(f"Insufficient budget for spend: {account_id} (available: {account.available})")
                 return False
             
-            # Update account
+            # Update account. Reservation consumption bounded by what is
+            # actually reserved (M6): a caller without a reservation cannot
+            # silently eat another allocation's hold.
+            consumed_from_reserved = min(amount, account.reserved)
             account.spent += amount
-            account.reserved = max(0, account.reserved - amount)
+            account.reserved -= consumed_from_reserved
             account.updated_at = now_utc()
             
             # Record transaction
@@ -358,11 +392,14 @@ class BudgetEngine:
                 actor_id=actor_id,
             )
             
-            # Check for alerts
-            self._check_alerts(account)
-            
+            # Collect alerts inside; fire after releasing the engine lock
+            pending_alerts = self._check_alerts(account)
+
             logger.info(f"Spent {amount} from {account_id}: {description}")
-            return True
+
+        for acct, atype in pending_alerts:
+            self._fire_alert(acct, atype)
+        return True
     
     def release_reservation(self, allocation_id: str) -> bool:
         """Release a budget reservation."""
@@ -402,47 +439,64 @@ class BudgetEngine:
         description: str = "",
         actor_id: str = "system",
     ) -> bool:
-        """Transfer budget between accounts."""
+        """Move budget capacity between accounts.
+
+        C4 fix: the old implementation subtracted from the destination's
+        `spent`, minting spending power out of thin air (a zero-limit
+        destination gained real budget). Capacity belongs to LIMIT, so a
+        transfer moves limit between accounts under these invariants:
+          - amount > 0 and finite
+          - both accounts operable (ACTIVE/WARNING/CRITICAL)
+          - source keeps limit >= spent + reserved (no unfunded obligations)
+          - conservation: sum(limit) unchanged
+        """
         with self._lock:
-            from_account = self._accounts.get(from_account_id)
-            to_account = self._accounts.get(to_account_id)
-            
-            if not from_account or not to_account:
+            src_acct = self._accounts.get(from_account_id)
+            dst_acct = self._accounts.get(to_account_id)
+            if not src_acct or not dst_acct:
                 return False
-            
-            if amount > from_account.available:
-                logger.warning(f"Insufficient budget for transfer from {from_account_id}")
+            if from_account_id == to_account_id:
                 return False
-            
-            # Deduct from source
-            from_account.spent += amount
-            from_account.reserved = max(0, from_account.reserved - amount)
-            from_account.updated_at = now_utc()
-            
-            # Add to destination (as negative spend = credit)
-            to_account.spent -= amount  # Negative spend increases available
-            to_account.updated_at = now_utc()
-            
-            # Record transactions
+            if amount <= 0 or amount != amount or amount == float("inf"):
+                logger.warning(f"transfer rejected: non-positive amount {amount}")
+                return False
+            if (src_acct.status not in self._OPERABLE
+                    or dst_acct.status not in self._OPERABLE):
+                logger.warning(
+                    f"transfer rejected: status "
+                    f"{src_acct.status.value}->{dst_acct.status.value}")
+                return False
+
+            floor_needed = src_acct.spent + src_acct.reserved
+            if src_acct.limit - amount < floor_needed:
+                logger.warning(
+                    f"transfer rejected: would strand obligations "
+                    f"(limit {src_acct.limit} - {amount} < committed {floor_needed})")
+                return False
+
+            src_acct.limit -= amount
+            dst_acct.limit += amount
+            src_acct.updated_at = now_utc()
+            dst_acct.updated_at = now_utc()
+
             self._record_transaction(
                 account_id=from_account_id,
                 transaction_type="transfer_out",
                 amount=amount,
-                description=f"Transfer to {to_account_id}: {description}",
+                description=f"Limit moved to {to_account_id}: {description}",
                 actor_id=actor_id,
             )
-            
             self._record_transaction(
                 account_id=to_account_id,
                 transaction_type="transfer_in",
                 amount=amount,
-                description=f"Transfer from {from_account_id}: {description}",
+                description=f"Limit received from {from_account_id}: {description}",
                 actor_id=actor_id,
             )
-            
-            logger.info(f"Transferred {amount} from {from_account_id} to {to_account_id}")
+            logger.info(f"Transferred {amount} capacity "
+                        f"{from_account_id} -> {to_account_id}")
             return True
-    
+
     def adjust_limit(self, account_id: str, new_limit: float, actor_id: str = "system") -> bool:
         """Adjust the budget limit of an account."""
         with self._lock:
@@ -567,7 +621,7 @@ class BudgetEngine:
         actor_id: str = "system",
     ) -> BudgetTransaction:
         account = self._accounts[account_id]
-        
+
         txn = BudgetTransaction(
             account_id=account_id,
             transaction_type=transaction_type,
@@ -582,20 +636,31 @@ class BudgetEngine:
         )
         
         self._transactions.append(txn)
+        if len(self._transactions) > self.MAX_TRANSACTIONS:
+            del self._transactions[:-self.MAX_TRANSACTIONS]
         return txn
     
-    def _check_alerts(self, account: BudgetAccount) -> None:
-        """Check and fire budget alerts."""
-        if account.is_critical and not account.status == BudgetStatus.CRITICAL:
+    def _check_alerts(self, account: BudgetAccount) -> list:
+        """Evaluate thresholds; returns pending (account, type) alerts.
+
+        Precedence fixed (N-B8): EXCEEDED is checked before CRITICAL so a
+        100%+ account is no longer mislabeled 'critical' forever.
+        Callers fire returned alerts AFTER releasing the engine lock so user
+        callbacks can never stall or deadlock the engine.
+        """
+        pending = []
+        if account.is_exceeded and account.status != BudgetStatus.EXCEEDED:
+            account.status = BudgetStatus.EXCEEDED
+            pending.append((account, "exceeded"))
+        elif (account.is_critical
+              and account.status not in (BudgetStatus.CRITICAL, BudgetStatus.EXCEEDED)):
             account.status = BudgetStatus.CRITICAL
-            self._fire_alert(account, "critical")
+            pending.append((account, "critical"))
         elif account.is_warning and account.status == BudgetStatus.ACTIVE:
             account.status = BudgetStatus.WARNING
-            self._fire_alert(account, "warning")
-        elif account.is_exceeded:
-            account.status = BudgetStatus.EXCEEDED
-            self._fire_alert(account, "exceeded")
-    
+            pending.append((account, "warning"))
+        return pending
+
     def _fire_alert(self, account: BudgetAccount, alert_type: str) -> None:
         for callback in self._alert_callbacks:
             try:

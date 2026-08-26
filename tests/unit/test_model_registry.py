@@ -40,22 +40,22 @@ class TestModelRegistry:
         assert "reasoner" in self.registry.models
         assert "vision-coder" in self.registry.models
         assert "laguna-s-2-1" in self.registry.models
-        assert "ling-3-0-flash" in self.registry.models
+        assert "nemotron-3.5-lightning" in self.registry.models
         assert "swarm-worker-qa" in self.registry.models
 
     def test_primary_model_selection(self):
         """Test getting primary model for a worker"""
         primary = self.registry.get_primary_model("innovator")
         assert primary is not None
-        assert primary.id == "deepseek-v4-flash"
+        assert primary.id == "nemotron-3.5-lightning"
         assert primary.priority == 1
 
     def test_fallback_chain(self):
         """Test fallback chain for innovator"""
         chain = self.registry.get_fallback_chain("innovator")
         assert len(chain) == 2
-        assert chain[0].id == "deepseek-v4-flash"
-        assert chain[1].id == "ling-flash"
+        assert chain[0].id == "nemotron-3.5-lightning"
+        assert chain[1].id == "tencent-hy3"
 
     def test_get_models_for_worker(self):
         """Test getting all models for a worker"""
@@ -66,7 +66,7 @@ class TestModelRegistry:
     def test_health_tracking(self):
         """Test health recording"""
         worker = "innovator"
-        model_id = "deepseek-v4-flash"
+        model_id = "nemotron-3.5-lightning"
         
         # Initial state should be healthy (default is HEALTHY)
         assert self.registry.is_healthy(worker, model_id) == True
@@ -82,7 +82,7 @@ class TestModelRegistry:
     def test_failure_tracking(self):
         """Test failure tracking and unhealthy detection"""
         worker = "innovator"
-        model_id = "deepseek-v4-flash"
+        model_id = "nemotron-3.5-lightning"
         
         # Initial state should be healthy
         assert self.registry.is_healthy(worker, model_id) == True
@@ -99,13 +99,13 @@ class TestModelRegistry:
 
     def test_get_stats(self):
         """Test stats retrieval"""
-        self.registry.record_success("innovator", "deepseek-v4-flash", 0.5)
-        self.registry.record_failure("innovator", "deepseek-v4-flash")
+        self.registry.record_success("innovator", "nemotron-3.5-lightning", 0.5)
+        self.registry.record_failure("innovator", "nemotron-3.5-lightning")
         
         stats = self.registry.get_stats("innovator")
-        assert "deepseek-v4-flash" in stats
-        assert stats["deepseek-v4-flash"]["success_rate"] == 0.5
-        assert stats["deepseek-v4-flash"]["consecutive_failures"] == 1
+        assert "nemotron-3.5-lightning" in stats
+        assert stats["nemotron-3.5-lightning"]["success_rate"] == 0.5
+        assert stats["nemotron-3.5-lightning"]["consecutive_failures"] == 1
 
 
 class TestCircuitBreaker:
@@ -197,27 +197,27 @@ class TestHealthMonitor:
         assert self.monitor._running == False
 
     def test_can_execute(self):
-        assert self.monitor.can_execute("innovator", "deepseek-v4-flash") == True
+        assert self.monitor.can_execute("innovator", "nemotron-3.5-lightning") == True
 
     def test_record_success_and_failure(self):
-        self.monitor.record_success("innovator", "deepseek-v4-flash", 0.1)
-        self.monitor.record_failure("innovator", "deepseek-v4-flash")
+        self.monitor.record_success("innovator", "nemotron-3.5-lightning", 0.1)
+        self.monitor.record_failure("innovator", "nemotron-3.5-lightning")
         
         stats = self.monitor.get_stats()
         # Should track the operations
         circuit_status = self.monitor.get_all_circuit_status()
-        assert "innovator:deepseek-v4-flash" in circuit_status
+        assert "innovator:nemotron-3.5-lightning" in circuit_status
 
     def test_circuit_breaker_integration(self):
         """Test circuit breaker opens after threshold failures"""
         for _ in range(3):
-            self.monitor.record_failure("innovator", "deepseek-v4-flash")
+            self.monitor.record_failure("innovator", "nemotron-3.5-lightning")
         
         # Circuit should be open
-        assert self.monitor.can_execute("innovator", "deepseek-v4-flash") == False
+        assert self.monitor.can_execute("innovator", "nemotron-3.5-lightning") == False
         
         # Get circuit status
-        status = self.monitor.get_circuit_status("innovator", "deepseek-v4-flash")
+        status = self.monitor.get_circuit_status("innovator", "nemotron-3.5-lightning")
         assert status["state"] == "open"
 
     def test_health_check_runs(self):
@@ -233,15 +233,15 @@ class TestHealthMonitor:
         monitor.circuit_breaker_timeout = 1  # 1 second for testing
         
         # First, open the circuit by recording failures
-        monitor.record_failure("innovator", "deepseek-v4-flash")
-        monitor.record_failure("innovator", "deepseek-v4-flash")
-        assert monitor.can_execute("innovator", "deepseek-v4-flash") == False
+        monitor.record_failure("innovator", "nemotron-3.5-lightning")
+        monitor.record_failure("innovator", "nemotron-3.5-lightning")
+        assert monitor.can_execute("innovator", "nemotron-3.5-lightning") == False
         
         # Wait for recovery timeout
         time.sleep(1.2)
         
         # Should transition to half-open and allow execution
-        assert monitor.can_execute("innovator", "deepseek-v4-flash") == True
+        assert monitor.can_execute("innovator", "nemotron-3.5-lightning") == True
         
         monitor.stop()
 

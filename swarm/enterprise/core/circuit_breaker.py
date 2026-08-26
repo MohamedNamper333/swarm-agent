@@ -1,14 +1,19 @@
 """
 Circuit Breaker — per-model circuit protection.
 
-Triggers when a model hits 80% of daily limit (per RateLimiterV2).
-When OPEN: requests are queued (or rejected with 503 if queue full).
-Resets automatically at 00:00 UTC (when daily counters reset).
+2026-08-25 rewrite fixing three defects found by institutional audit:
+- N1: HALF_OPEN was never ASSIGNED anywhere (dead state / dead branch).
+- N2: "auto reset at 00:00 UTC" was false — reset_daily() had no callers,
+      so an opened circuit stayed open until manual restart.
+- N3: opening at 80% wasted the remaining 20% of quota with no recovery.
 
-States:
-  CLOSED  — normal, requests pass through
-  OPEN    — model near/at limit, requests queued or rejected
-  HALF_OPEN — daily reset happened, probing with limited traffic
+Semantics now:
+  OPEN triggers at 100% of daily limit (80% remains a logged warning).
+  On UTC day rollover, fresh quota means circuits return directly to
+  CLOSED (probing an empty budget is meaningless). HALF_OPEN remains the
+  mid-day recovery state between OPEN and below-threshold health.
+  Queued requests survive until recovered via drain(); stale entries
+  expire after QUEUE_TTL_SEC.
 """
 import threading
 import time
@@ -43,6 +48,7 @@ class CircuitBreaker:
         self._queues: Dict[str, Deque] = defaultdict(deque)
         self._lock = threading.RLock()
         self._half_open_probes_used: Dict[str, int] = defaultdict(int)
+        self._last_seen_date: str = datetime.now(timezone.utc).strftime("%Y-%m-%d")
 
     def state_of(self, model_id: str) -> CircuitState:
         with self._lock:
@@ -52,30 +58,44 @@ class CircuitBreaker:
         return self.state_of(model_id) == CircuitState.OPEN
 
     def check_and_update(self, model_id: str) -> CircuitState:
-        """Re-evaluate circuit state based on rate limiter data."""
+        """Re-evaluate circuit state from rate limiter data + day rollover."""
+        today = datetime.now(timezone.utc).strftime("%Y-%m-%d")
         with self._lock:
+            # N2 fix: detect UTC day rollover ourselves. Fresh quota ->
+            # straight back to CLOSED (a probe against an untouched budget
+            # proves nothing; this also makes queued work recoverable ASAP).
+            if self._last_seen_date != today:
+                self._last_seen_date = today
+                self._half_open_probes_used.clear()
+                changed = [m for m, s in self._state.items()
+                           if s != CircuitState.CLOSED]
+                for m in self._state:
+                    self._state[m] = CircuitState.CLOSED
+                if changed:
+                    logger.info("UTC day rollover -> circuits CLOSED: %s",
+                                changed)
+
             used = self._rl.get_used(model_id)
             limit = self._rl.get_limit(model_id)
             pct = used / limit if limit > 0 else 0
             current = self._state[model_id]
 
-            if pct >= self.TRIGGER_THRESHOLD:
-                if current == CircuitState.CLOSED:
+            if pct >= 1.0:
+                # Truly exhausted (N3: was 0.80, wasting 20% headroom)
+                if current != CircuitState.OPEN:
                     logger.warning("Circuit OPEN for %s (%.1f%%)", model_id, pct * 100)
                     self._state[model_id] = CircuitState.OPEN
-                elif current == CircuitState.HALF_OPEN:
-                    # Re-tripped on probe
-                    self._state[model_id] = CircuitState.OPEN
-            else:
-                # Below threshold — close the circuit
-                if current != CircuitState.CLOSED:
-                    logger.info("Circuit CLOSED for %s (now %.1f%%)", model_id, pct * 100)
-                    self._state[model_id] = CircuitState.CLOSED
-                    self._half_open_probes_used[model_id] = 0
+            elif current == CircuitState.OPEN:
+                # Below exhaustion mid-day (e.g., penalty decay) -> recover
+                self._state[model_id] = CircuitState.HALF_OPEN
+            elif current == CircuitState.HALF_OPEN and pct < self.TRIGGER_THRESHOLD:
+                logger.info("Circuit CLOSED for %s (%.1f%%)", model_id, pct * 100)
+                self._state[model_id] = CircuitState.CLOSED
+                self._half_open_probes_used[model_id] = 0
             return self._state[model_id]
 
     def allow_request(self, model_id: str) -> bool:
-        """Decide whether to allow a request. Returns True if should proceed."""
+        """Decide whether a request may proceed right now."""
         state = self.check_and_update(model_id)
         if state == CircuitState.CLOSED:
             return True
@@ -85,8 +105,7 @@ class CircuitBreaker:
                     self._half_open_probes_used[model_id] += 1
                     return True
                 return False
-        # OPEN: request must go to queue or be rejected
-        return False
+        return False  # OPEN
 
     def enqueue(self, model_id: str, request_data: Any) -> bool:
         """Queue a request when circuit is OPEN. Returns False if queue full."""
@@ -108,6 +127,21 @@ class CircuitBreaker:
             if not q:
                 return None
             return q.popleft()[1]
+
+    def drain(self, model_id: str) -> list:
+        """Return ALL currently-queued payloads for a model (oldest first),
+        expiring stale ones. Callers own re-dispatching them."""
+        out = []
+        with self._lock:
+            q = self._queues[model_id]
+            now = time.time()
+            while q:
+                ts, data = q[0]
+                if now - ts > self.QUEUE_TTL_SEC:
+                    q.popleft(); continue
+                q.popleft()
+                out.append(data)
+        return out
 
     def queue_size(self, model_id: str) -> int:
         with self._lock:

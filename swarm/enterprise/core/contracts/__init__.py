@@ -86,21 +86,6 @@ class IOrchestrationClient(Protocol):
 # Execution Client Interface (for plane → execution)
 # =============================================================================
 
-@runtime_checkable
-class IExecutionClient(Protocol):
-    """Interface for execution plane - breaks plane → execution cycle."""
-    
-    async def execute(self, request: Any) -> Any:
-        """Execute a request in the execution plane."""
-        ...
-    
-    async def submit_job(self, job: Any) -> str:
-        """Submit job for async execution."""
-        ...
-    
-    async def get_status(self, job_id: str) -> Any:
-        """Get job execution status."""
-        ...
 
 
 # =============================================================================

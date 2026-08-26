@@ -93,6 +93,13 @@ def client():
         return manager, ac
 
     manager, sync_client = asyncio.run(_open_client())
+    # Authenticate the test client natively: real admin key as a default
+    # header so tests exercise the actual security gate.
+    from swarm.api.auth import get_auth_manager
+    _mgr = get_auth_manager()
+    _raw_key, _rec = _mgr.create_api_key("test-suite", ["admin"], owner="pytest")
+    sync_client.headers["Authorization"] = f"Bearer {_raw_key}"
+
     sync = _SyncClient(manager, sync_client)
     try:
         yield sync

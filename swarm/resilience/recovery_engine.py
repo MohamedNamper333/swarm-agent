@@ -6,7 +6,7 @@ import time
 import logging
 import threading
 from pathlib import Path
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, timezone
 from typing import Dict, List, Any, Optional, Callable
 from dataclasses import dataclass, field
 from enum import Enum
@@ -129,7 +129,15 @@ class RecoveryPlan:
         return sum(s.timeout_seconds for s in self.steps)
 
     def execution_order(self) -> List[RecoveryStep]:
-        """Topological sort: steps whose dependencies are all earlier in the list."""
+        """Topological sort. Raises ValueError on cycles or unknown
+        dependency references instead of silently executing steps whose
+        preconditions were never met (M4a fix)."""
+        known_ids = {s.id for s in self.steps}
+        for s in self.steps:
+            for dep in s.depends_on:
+                if dep not in known_ids:
+                    raise ValueError(
+                        f"Step '{s.id}' depends on unknown step '{dep}'")
         completed: set = set()
         ordered: List[RecoveryStep] = []
         remaining = list(self.steps)
@@ -142,9 +150,9 @@ class RecoveryPlan:
                     remaining.remove(step)
                     progress = True
             if not progress:
-                # cycle or missing dep: append rest in original order
-                ordered.extend(remaining)
-                break
+                raise ValueError(
+                    "Dependency cycle detected among steps: "
+                    + ", ".join(sorted(s.id for s in remaining)))
         return ordered
 
 
@@ -157,7 +165,7 @@ class RecoveryEngine:
     def __init__(
         self,
         snapshot_manager: Optional[SnapshotManager] = None,
-        storage_path: str = "swarm/resilience/recovery"
+        storage_path: str = "data/recovery"
     ):
         self.snapshot_manager = snapshot_manager or get_snapshot_manager()
         self.storage_path = Path(storage_path)
@@ -167,6 +175,10 @@ class RecoveryEngine:
         self.recovery_points: Dict[str, RecoveryPoint] = {}
         self.recovery_history: List[RecoveryEvent] = []
         self.stats = RecoveryStats()
+        # M4b: restores mutate real files — serialize globally; concurrent
+        # restores to overlapping targets previously corrupted them.
+        self._restore_lock = threading.Lock()
+        self.MAX_HISTORY = 500
 
     def register_recovery_point(
         self,
@@ -189,15 +201,16 @@ class RecoveryEngine:
                 snapshot_type=snapshot_type,
                 auto_create=auto_create,
                 retention_hours=retention_hours,
-                created_at=datetime.now().isoformat()
+                created_at=datetime.now(timezone.utc).isoformat()
             )
             self.recovery_points[point_id] = point
 
-            if auto_create:
-                self._create_snapshot_for_point(point_id)
+        # N4 fix: slow snapshot I/O outside the engine lock.
+        if auto_create:
+            self._create_snapshot_for_point(point_id)
 
-            logger.info(f"Registered recovery point: {name} ({point_id})")
-            return point_id
+        logger.info(f"Registered recovery point: {name} ({point_id})")
+        return point_id
 
     def _create_snapshot_for_point(self, point_id: str) -> Optional[str]:
         """Create a snapshot for a recovery point"""
@@ -258,7 +271,7 @@ class RecoveryEngine:
         start = time.monotonic()
         event = RecoveryEvent(
             id=event_id,
-            timestamp=datetime.now().isoformat(),
+            timestamp=datetime.now(timezone.utc).isoformat(),
             strategy=RecoveryStrategy.RESTORE_SPECIFIC,
             status=RecoveryStatus.IN_PROGRESS,
             snapshot_id=snapshot_id,
@@ -267,11 +280,12 @@ class RecoveryEngine:
         )
 
         try:
-            success = self.snapshot_manager.restore_snapshot(
-                snapshot_id,
-                target_dir=target_dir,
-                overwrite=overwrite
-            )
+            with self._restore_lock:
+                success = self.snapshot_manager.restore_snapshot(
+                    snapshot_id,
+                    target_dir=target_dir,
+                    overwrite=overwrite
+                )
 
             elapsed = time.monotonic() - start
             event.duration_seconds = elapsed
@@ -280,10 +294,11 @@ class RecoveryEngine:
                 event.status = RecoveryStatus.COMPLETED
                 with self._lock:
                     self.stats.successful_recoveries += 1
-                    total = self.stats.total_recoveries
+                    successes = self.stats.successful_recoveries
                     prev_avg = self.stats.avg_recovery_seconds
+                    # N7 fix: average over SUCCESSFUL recoveries only.
                     self.stats.avg_recovery_seconds = (
-                        (prev_avg * (total - 1) + elapsed) / total
+                        (prev_avg * (successes - 1) + elapsed) / successes
                     )
                     self.stats.snapshots_used += 1
                 logger.info(f"Recovery {event_id} completed in {elapsed:.2f}s")
@@ -305,6 +320,8 @@ class RecoveryEngine:
 
         with self._lock:
             self.recovery_history.append(event)
+            if len(self.recovery_history) > self.MAX_HISTORY:
+                del self.recovery_history[:-self.MAX_HISTORY]
 
         return event
 
@@ -364,13 +381,15 @@ class RecoveryEngine:
             }
 
 
-# Module-level singleton
+# Module-level singleton (thread-safe)
 _default_engine: Optional[RecoveryEngine] = None
+_singleton_lock = threading.Lock()
 
 
 def get_recovery_engine() -> RecoveryEngine:
-    """Get or create the default recovery engine"""
+    """Get or create the default recovery engine."""
     global _default_engine
-    if _default_engine is None:
-        _default_engine = RecoveryEngine()
-    return _default_engine
+    with _singleton_lock:
+        if _default_engine is None:
+            _default_engine = RecoveryEngine()
+        return _default_engine

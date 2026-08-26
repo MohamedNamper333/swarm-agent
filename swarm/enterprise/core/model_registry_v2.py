@@ -74,10 +74,19 @@ class EnterpriseModelRegistry:
     # ------------------------------------------------------------------
     MODELS: Dict[str, EnterpriseModelConfig] = {}
 
+    # NOTE (2026-08-25): Live-tested against integrate.api.nvidia.com/v1/chat/completions.
+    # Removed (EOL/404): deepseek-v4-pro, deepseek-v4-flash, z-ai/glm*, moonshotai/kimi-k2.5,
+    # kimi-k2-instruct, thinkingmachines/inkling, mistral-small-4, mistral-medium-3.5,
+    # google/gemma-3-27b-it, all qwen/*, black-forest-labs/flux.*, stabilityai/*,
+    # microsoft/trellis, nvidia/cosmos-predict1-7b, nemotron-content-safety-reasoning-4b,
+    # nemotron-3-content-safety, nemoguard-jailbreak-detect.
+    # Image/video *generation* endpoints are gone from NIM free tier; those agents now
+    # fall back to multimodal vision LLMs for design/video reasoning tasks.
+
     # Tier 1: Board (5 agents)
     BOARD = {
         "chairman": FallbackChain("chairman",
-            "deepseek-ai/deepseek-v4-pro", "deepseek-ai/deepseek-v4-flash", "z-ai/glm5.1",
+            "moonshotai/kimi-k3", "stepfun-ai/step-3.7-flash", "minimaxai/minimax-m3",
             veto=False, timeout_sec=5),
         "strategy_advisor": FallbackChain("strategy_advisor",
             "openai/gpt-oss-120b", "openai/gpt-oss-20b", "nvidia/nemotron-3-super-120b-a12b"),
@@ -89,25 +98,25 @@ class EnterpriseModelRegistry:
             "nvidia/nemotron-3-super-120b-a12b", "nvidia/llama-3.3-nemotron-super-49b-v1.5",
             "nvidia/nemotron-3-nano-30b-a3b"),
         "user_advisor": FallbackChain("user_advisor",
-            "moonshotai/kimi-k2.5", "meta/llama-3.2-11b-vision-instruct", "moonshotai/kimi-k2-instruct"),
+            "moonshotai/kimi-k3", "meta/llama-3.2-11b-vision-instruct", "minimaxai/minimax-m3"),
     }
 
     # Tier 2: C-Suite (7 agents)
     C_SUITE = {
         "ceo": FallbackChain("ceo",
-            "deepseek-ai/deepseek-v4-pro", "deepseek-ai/deepseek-v4-flash", "z-ai/glm5.1"),
+            "moonshotai/kimi-k3", "stepfun-ai/step-3.7-flash", "minimaxai/minimax-m3"),
         "cto": FallbackChain("cto",
             "nvidia/nemotron-3-super-120b-a12b", "nvidia/llama-3.3-nemotron-super-49b-v1.5",
             "nvidia/nemotron-3-nano-30b-a3b"),
         "cfo": FallbackChain("cfo",
-            "mistralai/mistral-small-4-119b-2603", "mistralai/mistral-nemotron", "nvidia/nemotron-mini-4b-instruct"),
+            "mistralai/mistral-nemotron", "openai/gpt-oss-20b", "nvidia/nemotron-mini-4b-instruct"),
         "coo": FallbackChain("coo",
             "nvidia/llama-3.3-nemotron-super-49b-v1.5", "nvidia/nemotron-3-super-120b-a12b",
             "nvidia/nemotron-3-nano-30b-a3b"),
         "cmo": FallbackChain("cmo",
-            "moonshotai/kimi-k2.5", "meta/llama-3.2-11b-vision-instruct", "moonshotai/kimi-k2-instruct"),
+            "moonshotai/kimi-k3", "meta/llama-3.2-11b-vision-instruct", "minimaxai/minimax-m3"),
         "chro": FallbackChain("chro",
-            "z-ai/glm5.1", "qwen/qwen3-next-80b-a3b-instruct", "nvidia/nemotron-mini-4b-instruct"),
+            "stepfun-ai/step-3.7-flash", "minimaxai/minimax-m3", "nvidia/nemotron-mini-4b-instruct"),
         "clo": FallbackChain("clo",
             "nvidia/nemotron-3-ultra-550b-a55b", "nvidia/nemotron-3-super-120b-a12b",
             "nvidia/llama-3.3-nemotron-super-49b-v1.5",
@@ -123,9 +132,9 @@ class EnterpriseModelRegistry:
             "nvidia/nemotron-3-super-120b-a12b", "nvidia/llama-3.3-nemotron-super-49b-v1.5",
             "nvidia/nemotron-3-nano-30b-a3b"),
         "coder_1": FallbackChain("coder_1",
-            "qwen/qwen2.5-coder-32b-instruct", "qwen/qwen3-coder-480b-a35b-instruct", "qwen/qwq-32b"),
+            "moonshotai/kimi-k3", "minimaxai/minimax-m3", "stepfun-ai/step-3.7-flash"),
         "coder_2": FallbackChain("coder_2",
-            "qwen/qwen3-coder-480b-a35b-instruct", "qwen/qwen2.5-coder-32b-instruct", "qwen/qwq-32b"),
+            "minimaxai/minimax-m3", "moonshotai/kimi-k3", "nvidia/nemotron-3.5-lightning-30b-a3b"),
         "code_reviewer": FallbackChain("code_reviewer",
             "nvidia/nemotron-3-ultra-550b-a55b", "nvidia/nemotron-3-super-120b-a12b",
             "nvidia/llama-3.3-nemotron-super-49b-v1.5",
@@ -153,48 +162,50 @@ class EnterpriseModelRegistry:
 
     DESIGN = {
         "design_director": FallbackChain("design_director",
-            "moonshotai/kimi-k2.5", "meta/llama-3.2-11b-vision-instruct", "moonshotai/kimi-k2-instruct"),
+            "moonshotai/kimi-k3", "meta/llama-3.2-11b-vision-instruct", "minimaxai/minimax-m3"),
+        # NOTE: image *generation* endpoints (flux.*, stable-diffusion-xl) removed from
+        # NIM free tier. These agents now use multimodal vision LLMs for design reasoning.
         "image_gen_1": FallbackChain("image_gen_1",
-            "black-forest-labs/flux.1-dev", "black-forest-labs/flux.2-klein-4b",
-            "stabilityai/stable-diffusion-xl", timeout_sec=15),
+            "moonshotai/kimi-k3", "meta/llama-3.2-90b-vision-instruct", timeout_sec=15),
         "image_gen_2": FallbackChain("image_gen_2",
-            "black-forest-labs/flux.2-klein-4b", "black-forest-labs/flux.1-schnell",
-            "black-forest-labs/flux.1-dev", timeout_sec=10),
+            "meta/llama-3.2-11b-vision-instruct", "meta/llama-3.2-90b-vision-instruct", timeout_sec=10),
         "ui_designer": FallbackChain("ui_designer",
-            "moonshotai/kimi-k2.5", "meta/llama-3.2-11b-vision-instruct", "deepseek-ai/deepseek-v4-flash"),
+            "moonshotai/kimi-k3", "meta/llama-3.2-11b-vision-instruct", "minimaxai/minimax-m3"),
         "graphic_designer": FallbackChain("graphic_designer",
-            "thinking machines/inkling", "moonshotai/kimi-k2.5", "deepseek-ai/deepseek-v4-flash"),
+            "moonshotai/kimi-k3", "minimaxai/minimax-m3", "meta/llama-3.2-11b-vision-instruct"),
         "ux_specialist": FallbackChain("ux_specialist",
-            "moonshotai/kimi-k2.5", "meta/llama-3.2-11b-vision-instruct", "moonshotai/kimi-k2-instruct"),
+            "moonshotai/kimi-k3", "meta/llama-3.2-11b-vision-instruct", "minimaxai/minimax-m3"),
         "3d_designer_1": FallbackChain("3d_designer_1",
-            "microsoft/trellis", "minimaxai/minimax-m3", timeout_sec=20),
+            "minimaxai/minimax-m3", "moonshotai/kimi-k3", timeout_sec=20),
         "3d_designer_2": FallbackChain("3d_designer_2",
-            "microsoft/trellis", "minimaxai/minimax-m3", timeout_sec=20),
+            "minimaxai/minimax-m3", "moonshotai/kimi-k3", timeout_sec=20),
     }
 
     VIDEO = {
         "video_director": FallbackChain("video_director",
-            "minimaxai/minimax-m3", "moonshotai/kimi-k2.5", "meta/llama-3.2-11b-vision-instruct"),
+            "minimaxai/minimax-m3", "moonshotai/kimi-k3", "meta/llama-3.2-11b-vision-instruct"),
+        # NOTE: video *generation* endpoints (cosmos-predict1, stable-video-diffusion)
+        # removed from NIM free tier. Using vision LLMs for video reasoning instead.
         "video_gen_1": FallbackChain("video_gen_1",
-            "nvidia/cosmos-predict1-7b", "stabilityai/stable-video-diffusion", timeout_sec=30),
+            "moonshotai/kimi-k3", "meta/llama-3.2-90b-vision-instruct", timeout_sec=30),
         "video_gen_2": FallbackChain("video_gen_2",
-            "stabilityai/stable-video-diffusion", "nvidia/cosmos-predict1-7b", timeout_sec=30),
+            "meta/llama-3.2-90b-vision-instruct", "meta/llama-3.2-11b-vision-instruct", timeout_sec=30),
         "animator_2d": FallbackChain("animator_2d",
-            "minimaxai/minimax-m3", "moonshotai/kimi-k2.5", "google/gemma-3-27b-it"),
+            "minimaxai/minimax-m3", "moonshotai/kimi-k3", "meta/llama-3.2-11b-vision-instruct"),
         "motion_graphics": FallbackChain("motion_graphics",
-            "mistralai/mistral-medium-3.5-128b", "google/gemma-3-27b-it",
+            "mistralai/mistral-nemotron", "stepfun-ai/step-3.7-flash",
             "nvidia/nemotron-mini-4b-instruct"),
         "motion_designer": FallbackChain("motion_designer",
-            "mistralai/mistral-medium-3.5-128b", "google/gemma-3-27b-it", "nvidia/nemotron-mini-4b-instruct"),
+            "mistralai/mistral-nemotron", "stepfun-ai/step-3.7-flash", "nvidia/nemotron-mini-4b-instruct"),
     }
 
     RESEARCH = {
         "research_director": FallbackChain("research_director",
             "openai/gpt-oss-120b", "openai/gpt-oss-20b", "nvidia/nemotron-3-super-120b-a12b"),
         "researcher_1": FallbackChain("researcher_1",
-            "openai/gpt-oss-120b", "nvidia/nemotron-3-super-120b-a12b", "deepseek-ai/deepseek-v4-flash"),
+            "openai/gpt-oss-120b", "nvidia/nemotron-3-super-120b-a12b", "stepfun-ai/step-3.7-flash"),
         "researcher_2": FallbackChain("researcher_2",
-            "deepseek-ai/deepseek-v4-flash", "nvidia/nemotron-3-nano-30b-a3b", "nvidia/nemotron-mini-4b-instruct"),
+            "stepfun-ai/step-3.7-flash", "nvidia/nemotron-3-nano-30b-a3b", "nvidia/nemotron-mini-4b-instruct"),
         "fact_checker": FallbackChain("fact_checker",
             "nvidia/nemotron-3-super-120b-a12b", "nvidia/llama-3.3-nemotron-super-49b-v1.5",
             "openai/gpt-oss-20b"),
@@ -202,28 +213,29 @@ class EnterpriseModelRegistry:
 
     DATA = {
         "data_director": FallbackChain("data_director",
-            "google/gemma-3-27b-it", "google/gemma-3n-e4b-it", "nvidia/nemotron-3-nano-30b-a3b"),
+            "stepfun-ai/step-3.7-flash", "nvidia/nemotron-3-nano-30b-a3b",
+            "nvidia/nemotron-mini-4b-instruct"),
         "data_analyst": FallbackChain("data_analyst",
-            "google/gemma-3-27b-it", "nvidia/nemotron-3-nano-30b-a3b", "nvidia/nemotron-mini-4b-instruct"),
+            "stepfun-ai/step-3.7-flash", "nvidia/nemotron-3-nano-30b-a3b", "nvidia/nemotron-mini-4b-instruct"),
         "data_engineer": FallbackChain("data_engineer",
             "nvidia/nemotron-3-nano-30b-a3b", "nvidia/nemotron-mini-4b-instruct",
             "nvidia/nvidia-nemotron-nano-9b-v2"),
         "data_scientist": FallbackChain("data_scientist",
-            "nvidia/nemotron-3-super-120b-a12b", "google/gemma-3-27b-it",
+            "nvidia/nemotron-3-super-120b-a12b", "stepfun-ai/step-3.7-flash",
             "nvidia/nemotron-3-nano-30b-a3b"),
         "database_admin": FallbackChain("database_admin",
-            "qwen/qwen2.5-coder-32b-instruct", "nvidia/nemotron-3-nano-30b-a3b",
+            "minimaxai/minimax-m3", "nvidia/nemotron-3-nano-30b-a3b",
             "nvidia/nemotron-mini-4b-instruct"),
     }
 
     LANGUAGE = {
         "language_director": FallbackChain("language_director",
-            "z-ai/glm5.1", "z-ai/glm4.7", "z-ai/glm-5.2"),
+            "moonshotai/kimi-k3", "stepfun-ai/step-3.7-flash", "minimaxai/minimax-m3"),
         "translator": FallbackChain("translator",
             "nvidia/riva-translate-4b-instruct-v2", "nvidia/riva-translate-4b-instruct-v1.1",
-            "z-ai/glm5.1"),
+            "stepfun-ai/step-3.7-flash"),
         "localizer": FallbackChain("localizer",
-            "z-ai/glm5.1", "z-ai/glm-5.2", "sarvamai/sarvam-m"),
+            "moonshotai/kimi-k3", "stepfun-ai/step-3.7-flash", "minimaxai/minimax-m3"),
     }
 
     KNOWLEDGE = {
@@ -252,30 +264,30 @@ class EnterpriseModelRegistry:
         "content_safety_analyst": FallbackChain("content_safety_analyst",
             "nvidia/llama-3.1-nemoguard-8b-content-safety",
             "nvidia/nemotron-3.5-content-safety",
-            "nvidia/nemotron-content-safety-reasoning-4b", timeout_sec=2),
+            "nvidia/llama-3.1-nemoguard-8b-topic-control", timeout_sec=2),
         "topic_control_analyst": FallbackChain("topic_control_analyst",
             "nvidia/llama-3.1-nemoguard-8b-topic-control",
-            "nvidia/nemotron-3-content-safety",
-            "nvidia/nemotron-3.5-content-safety", timeout_sec=2),
+            "nvidia/nemotron-3.5-content-safety",
+            "nvidia/llama-3.1-nemoguard-8b-content-safety", timeout_sec=2),
         "jailbreak_analyst": FallbackChain("jailbreak_analyst",
-            "nvidia/nemoguard-jailbreak-detect",
-            "nvidia/nemotron-content-safety-reasoning-4b",
-            "nvidia/nemotron-3.5-content-safety", timeout_sec=2),
+            "nvidia/nemotron-3.5-content-safety",
+            "nvidia/llama-3.1-nemoguard-8b-content-safety",
+            "nvidia/llama-3.1-nemoguard-8b-topic-control", timeout_sec=2),
     }
 
     INLINE_SAFETY = {
         "inline_output_check": FallbackChain("inline_output_check",
             "nvidia/nemotron-3.5-content-safety",
-            "nvidia/nemotron-3-content-safety",
-            "nvidia/nemotron-content-safety-reasoning-4b", timeout_sec=2),
+            "nvidia/llama-3.1-nemoguard-8b-content-safety",
+            "nvidia/llama-3.1-nemoguard-8b-topic-control", timeout_sec=2),
         "inline_input_reasoning": FallbackChain("inline_input_reasoning",
-            "nvidia/nemotron-content-safety-reasoning-4b",
+            "nvidia/llama-3.1-nemoguard-8b-content-safety",
             "nvidia/nemotron-3.5-content-safety",
-            "nvidia/nemotron-3-content-safety", timeout_sec=2),
+            "nvidia/llama-3.1-nemoguard-8b-topic-control", timeout_sec=2),
         "inline_jailbreak": FallbackChain("inline_jailbreak",
-            "nvidia/nemoguard-jailbreak-detect",
-            "nvidia/nemotron-content-safety-reasoning-4b",
-            "nvidia/nemotron-3.5-content-safety", timeout_sec=2),
+            "nvidia/nemotron-3.5-content-safety",
+            "nvidia/llama-3.1-nemoguard-8b-content-safety",
+            "nvidia/llama-3.1-nemoguard-8b-topic-control", timeout_sec=2),
     }
 
     ALL_CHAINS: Dict[str, FallbackChain] = {}

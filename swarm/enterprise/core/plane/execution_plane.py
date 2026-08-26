@@ -126,7 +126,7 @@ class ExecutionPlane:
         worker_pool: Any = None,
         job_queue: Any = None,
     ):
-        self.executor_registry = executor_registry or self._lazy.get_durable_job()  # Will be replaced
+        self.executor_registry = executor_registry  # Populated lazily; see _ensure_executor()
         self.worker_pool = worker_pool
         self.job_queue = job_queue
         self._lock = threading.RLock()

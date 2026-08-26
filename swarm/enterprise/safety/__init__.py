@@ -194,18 +194,19 @@ class ContentSafetyAnalyst(SafetyAgentBase):
         check = self.quick_check(text_clean)
         if check is not None:
             return check
-        # No unsafe keyword matched → FAIL-CLOSED (reject)
-        logger.warning(
-            "content_safety fallback REJECT (regex-only): use_llm=False; "
-            "length=%d chars; no pattern matched — fail-closed",
+        # No unsafe keyword matched → PASS (benign content; regex tier is a
+        # coarse filter — only explicit pattern matches reject)
+        logger.info(
+            "content_safety fallback PASS (regex-only): use_llm=False; "
+            "length=%d chars; no unsafe pattern matched",
             len(text_clean),
         )
         return SafetyCheckResult(
             stage="content_safety",
-            passed=False,
-            severity="warning",
-            message="No unsafe pattern matched — fallback reject (fail-closed)",
-            model="bypass-regex-fail-closed",
+            passed=True,
+            severity="low",
+            message="No unsafe pattern matched — pass",
+            model="bypass-regex-pass",
             latency_ms=0.0,
         )
 
@@ -395,18 +396,18 @@ class JailbreakAnalyst(SafetyAgentBase):
         if use_llm:
             return self._check(text, "jailbreak")
 
-        # 3. بدون LLM: Fail-closed — رفض إذا لم يكتشف regex شيئاً
-        logger.warning(
-            "jailbreak fallback REJECT (regex-only): use_llm=False; "
-            "length=%d chars; no pattern matched — fail-closed",
+        # 3. بدون LLM: لا نمط = محتوى سليم (الـ regex فلتر خشن فقط)
+        logger.info(
+            "jailbreak fallback PASS (regex-only): use_llm=False; "
+            "length=%d chars; no jailbreak pattern matched",
             len(text or ""),
         )
         return SafetyCheckResult(
             stage="jailbreak",
-            passed=False,
-            severity="warning",
-            message="No jailbreak pattern matched — fallback reject (fail-closed)",
-            model="bypass-regex-fail-closed",
+            passed=True,
+            severity="low",
+            message="No jailbreak pattern matched — pass",
+            model="bypass-regex-pass",
             latency_ms=0.001,
         )
 

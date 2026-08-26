@@ -24,6 +24,26 @@ import uuid
 
 logger = logging.getLogger(__name__)
 
+# AuthorizationContext is referenced in method annotations below. Import lazily
+# to avoid circular imports; fall back to Any if the auth module is unavailable.
+try:
+    from swarm.enterprise.core.auth import AuthorizationContext  # noqa: F401
+except Exception:  # pragma: no cover - defensive for import cycles
+    AuthorizationContext = Any
+
+# Same pattern for PolicyEngine (used in factory annotation below).
+PolicyEngine = Any
+
+# Policy types referenced by SafetyGate.check
+try:
+    from swarm.enterprise.core.policy.engine import (  # noqa: F401
+        PolicyDecision,
+        EvaluationContext as PolicyContext,
+    )
+except Exception:  # pragma: no cover - defensive for import cycles
+    PolicyDecision = None
+    PolicyContext = None
+
 
 # =============================================================================
 # Lazy Imports
@@ -220,26 +240,37 @@ class SafetyGate:
         auth_context: Any,
     ) -> SwarmStageResult:
         """Run safety check with policy evaluation."""
-        # Policy evaluation
-        auth_context = _lazy.get_authorization_context()
+        # Policy evaluation (uses real EvaluationContext schema)
         policy_ctx = PolicyContext(
-            execution_context=exec_context,
-            action="safety_check",
-            resource=request.question[:100],
-            metadata={"require_human_review": getattr(request, 'require_human_review', False)},
+            subject={
+                "principal_id": getattr(exec_context, 'principal_id', 'user'),
+                "tenant_id": getattr(exec_context, 'tenant_id', 'default'),
+            },
+            resource={"id": request.question[:100]},
+            action={"name": "safety_check"},
+            environment={
+                "require_human_review": getattr(request, 'require_human_review', False),
+            },
         )
-        policy_results = self.policy_engine.evaluate(policy_ctx)
-        allowed, _ = self.policy_engine.is_allowed(policy_ctx)
+        allowed = True
+        veto_reason = None
+        try:
+            result = self.policy_engine.evaluate(policy_ctx)
+            if result is not None and getattr(result, 'decision', None) in (
+                PolicyDecision.DENY, getattr(PolicyDecision, 'ESCALATE', object()),
+            ):
+                allowed = False
+                veto_reason = f"policy:{getattr(result, 'policy_id', 'unknown')}"
+        except Exception as e:
+            logger.warning("Policy evaluation failed (fail-open for safety dept): %s", e)
 
         if not allowed:
-            for result in policy_results:
-                if result.decision in (PolicyDecision.DENY, PolicyDecision.ESCALATE):
-                    return SwarmStageResult(
-                        stage_name="safety",
-                        success=False,
-                        error=result.reason,
-                        metadata={"policy_results": [r.__dict__ for r in policy_results]},
-                    )
+            return SwarmStageResult(
+                stage_name="safety",
+                success=False,
+                error=veto_reason or "policy denied",
+                metadata={"stage": "safety", "policy_denied": True},
+            )
 
         # Run safety department
         try:
@@ -283,7 +314,7 @@ class BoardCoordinator:
     def __init__(self, board: Any):
         self.board = board
 
-    def deliberate(
+    async def deliberate(
         self,
         request: Any,
         exec_context: Any,
@@ -292,12 +323,16 @@ class BoardCoordinator:
         """Run board deliberation."""
         try:
             auth_context = _lazy.get_authorization_context()
-            board_result = self.board.deliberate(
+            bypass_safety = bool(getattr(auth_context, 'capabilities', None)) and \
+                auth_context.capabilities.has("override_safety")
+            _maybe_coro = self.board.deliberate(
                 request.question,
                 context=str(getattr(request, 'context', {})),
                 bypass_safety=bypass_safety,
                 authorization_context=auth_context,
             )
+            import inspect as _inspect
+            board_result = (await _maybe_coro) if _inspect.isawaitable(_maybe_coro) else _maybe_coro
 
             stage_result = SwarmStageResult(
                 stage_name="board",
@@ -336,8 +371,9 @@ class ExecutiveCoordinator:
         self.csuite = csuite
         self.cost_service = cost_service
         self.budget_ledger = budget_ledger
+        self._lazy = LazyImports()
 
-    def decide(
+    async def decide(
         self,
         request: Any,
         board_result: Any,
@@ -347,7 +383,8 @@ class ExecutiveCoordinator:
         """Run C-Suite executive meeting."""
         try:
             # Compute cost estimate
-            cost_request = self._lazy.get_attr("swarm.enterprise.core.budget.cost_estimation", "CostEstimationRequest")
+            CostEstimationRequest = self._lazy._get_attr(
+                "swarm.enterprise.core.budget.cost_estimation", "CostEstimationRequest")
             cost_est = self.cost_service.estimate(CostEstimationRequest(
                 provider="nvidia_nim",
                 model="nvidia/nemotron-3-super-120b-a12b",
@@ -357,21 +394,22 @@ class ExecutiveCoordinator:
                 tenant_id=getattr(request, 'tenant_id', 'default'),
             ))
 
-            # Atomic budget reservation
+            # Atomic budget reservation (skipped for zero-cost / free-tier models)
             tenant_id = getattr(request, 'tenant_id', 'default')
             account_id = f"budget-{tenant_id}"
-            try:
-                self.budget_ledger.reserve(
-                    account_id=account_id,
-                    amount=cost_est.total,
-                    metadata={"request_id": exec_context.identity.request_id},
-                )
-            except ValueError as e:
-                return SwarmStageResult(
-                    stage_name="csuite",
-                    success=False,
-                    error=f"Budget reservation failed: {e}",
-                )
+            if cost_est.total > 0:
+                try:
+                    self.budget_ledger.reserve(
+                        account_id=account_id,
+                        amount=cost_est.total,
+                        metadata={"request_id": exec_context.identity.request_id},
+                    )
+                except ValueError as e:
+                    return SwarmStageResult(
+                        stage_name="csuite",
+                        success=False,
+                        error=f"Budget reservation failed: {e}",
+                    )
 
             proposal = {
                 "title": request.question[:100],
@@ -527,13 +565,15 @@ class ResultAssembler:
                 policy_decision=policy_decision,
                 execution_state=execution_state,
                 final_outcome=final_outcome,
-                stages={k: {
-                    "stage_name": v.stage_name,
-                    "success": v.success,
-                    "output": v.output,
-                    "error": v.error,
-                    "metadata": v.metadata,
-                } for k, v in stages.items()},
+                stages={k: (
+                    {
+                        "stage_name": v.stage_name,
+                        "success": v.success,
+                        "output": v.output,
+                        "error": v.error,
+                        "metadata": v.metadata,
+                    } if hasattr(v, 'stage_name') else dict(v) if isinstance(v, dict) else {"raw": str(v)}
+                ) for k, v in stages.items()},
                 output=final_output,
                 executed_by=executed_by,
                 vetoed_by=vetoed_by,

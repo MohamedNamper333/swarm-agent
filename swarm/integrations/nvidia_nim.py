@@ -98,6 +98,7 @@ class NVIDIANIMClient:
         top_p: float = 0.95,
         stream: bool = False,
         extra: Optional[Dict[str, Any]] = None,
+        timeout: Optional[float] = None,
     ) -> ChatCompletionResult:
         """Send a chat completion request.
 
@@ -105,6 +106,7 @@ class NVIDIANIMClient:
         "nvidia/nemotron-3-ultra-550b-a55b" or
         "deepseek-ai/deepseek-v4-pro".
         """
+        request_timeout = timeout if timeout is not None else self.timeout
         url = f"{self.base_url}/chat/completions"
         payload: Dict[str, Any] = {
             "model": model,
@@ -126,11 +128,11 @@ class NVIDIANIMClient:
         t0 = time.monotonic()
         try:
             resp = self.session.post(
-                url, json=payload, headers=headers, timeout=self.timeout
+                url, json=payload, headers=headers, timeout=request_timeout
             )
         except requests.Timeout as exc:
             raise NIMTimeoutError(
-                f"NIM chat timeout after {self.timeout}s for {model}"
+                f"NIM chat timeout after {request_timeout}s for {model}"
             ) from exc
         except requests.RequestException as exc:
             raise NIMError(f"NIM network error for {model}: {exc}") from exc

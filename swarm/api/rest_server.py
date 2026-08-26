@@ -27,7 +27,7 @@ from contextlib import asynccontextmanager
 
 from swarm.resilience.task_queue import TaskQueue
 from swarm.core.agent_state_machine import AgentState as ASState
-from swarm.api.auth import get_auth_manager, require_scopes
+from swarm.api.auth import get_auth_manager, get_current_user, require_scopes
 
 logger = logging.getLogger(__name__)
 
@@ -228,6 +228,30 @@ app = FastAPI(
     version="3.0.0",
     lifespan=lifespan
 )
+
+# =============================================================================
+# Secure-by-default auth gate (2026-08-25)
+#
+# Audit found 33/47 endpoints had NO authentication (including POST /tasks,
+# /board/deliberate, /code/review...). Instead of patching routes one by one
+# (and inevitably missing future ones), a global dependency enforces
+# authentication on EVERY route; explicitly public paths are allow-listed.
+# Routes that already declare require_scopes(...) keep their finer-grained
+# checks — dependencies stack.
+# =============================================================================
+
+_PUBLIC_PATHS = {
+    "/", "/health", "/health/system", "/docs", "/redoc",
+    "/openapi.json", "/favicon.ico",
+}
+
+async def _global_auth_guard(request: Request) -> None:
+    if request.url.path in _PUBLIC_PATHS:
+        return
+    # Delegate to the standard bearer/apikey validation.
+    await get_current_user(request)
+
+app.router.dependencies = [Depends(_global_auth_guard)] + list(app.router.dependencies)
 
 # CORS
 app.add_middleware(

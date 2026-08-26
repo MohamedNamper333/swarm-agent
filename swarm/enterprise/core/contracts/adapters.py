@@ -9,9 +9,12 @@ from datetime import datetime, timezone
 from enum import Enum
 import logging
 
+# 2026-08-25: the Service-suffixed names below NEVER existed in contracts —
+# the real Protocol interfaces are Validator/Client-suffixed. Importing them
+# made this whole module unimportable.
 from . import (
-    IPolicyService, IBudgetService, IAuthService, 
-    IJobService, IOrchestrationService, IRoutingService,
+    IPolicyValidator, IBudgetClient, IAuthClient,
+    IExecutionClient, IOrchestrationClient, IRoutingClient,
 )
 
 logger = logging.getLogger(__name__)

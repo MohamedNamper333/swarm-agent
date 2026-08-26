@@ -21,7 +21,7 @@ from typing import Any, Dict, List, Optional
 from typing import Any, Dict, List, Optional
 
 from swarm.enterprise.core.fallback_chain import FallbackChainExecutor
-from swarm.enterprise.core.model_registry_v2 import EnterpriseModelRegistry, FallbackChain
+from swarm.enterprise.core.model_registry_v2 import EnterpriseModelRegistry  # noqa: F401 (used in annotations)
 from swarm.enterprise.core.safety_filter import InlineSafetyFilter, SafetyViolation
 from swarm.enterprise.core.cache_manager import get_default_cache
 
@@ -74,7 +74,7 @@ import threading
 from typing import Any, Dict, List, Optional
 
 from swarm.enterprise.core.fallback_chain import FallbackChainExecutor
-from swarm.enterprise.core.model_registry_v2 import EnterpriseModelRegistry, FallbackChain
+from swarm.enterprise.core.model_registry_v2 import EnterpriseModelRegistry  # noqa: F401 (used in annotations)
 from swarm.enterprise.core.safety_filter import InlineSafetyFilter, SafetyViolation
 from swarm.enterprise.core.cache_manager import get_default_cache
 
@@ -101,25 +101,62 @@ class BoardDecision:
 # =============================================================================
 
 class BoardAgent:
-    """Base class for board agents."""
+    """Base class for board agents.
+
+    Uses FallbackChainExecutor.execute(role, prompt) which resolves the
+    role's fallback chain from EnterpriseModelRegistry automatically.
+    """
 
     def __init__(
         self,
         role: str,
-        chain: FallbackChain,
-        model_registry: EnterpriseModelRegistry,
-        safety_filter: InlineSafetyFilter,
+        model_registry: Optional[EnterpriseModelRegistry] = None,
+        safety_filter: Optional[InlineSafetyFilter] = None,
     ):
         self.role = role
-        self.chain = chain
         self.model_registry = model_registry
         self.safety_filter = safety_filter
-        self.executor = FallbackChainExecutor(chain, model_registry, safety_filter)
+        self.executor = FallbackChainExecutor()
 
     async def deliberate(self, question: str, context: str = "") -> Dict[str, Any]:
-        """Deliberate on a question."""
+        """Deliberate on a question via the role's model fallback chain."""
+        import asyncio as _asyncio
+
         prompt = self._build_prompt(question)
-        return await self.executor.execute(prompt)
+        result = await _asyncio.to_thread(self.executor.execute, self.role, prompt)
+        if not result.success or result.output is None:
+            # Fail-open with abstention so one dead model doesn't veto the board.
+            return {"vote": "abstain", "decision": "approved", "reason": result.error}
+        return self._parse_output(result.output)
+
+    def _parse_output(self, text: Any) -> Dict[str, Any]:
+        """Parse model output into a vote.
+
+        Uses word boundaries and negation awareness — a model saying
+        "no veto needed" must NOT count as a veto (previous substring
+        matching caused false vetoes).
+        """
+        import re as _re
+        raw = text if isinstance(text, str) else str(text)
+        low = raw.lower()
+
+        # Negated veto ("no veto", "not veto", "doesn't warrant a veto") → approve.
+        if _re.search(r"\b(no|not|n't|without|avoid)\s+\w*\s*veto", low):
+            vote = "approve"
+        elif _re.search(r"\bveto(ed)?\b", low):
+            vote = "veto"
+        elif _re.search(r"\b(reject|rejected|deny|denied)\b", low):
+            vote = "reject"
+        elif _re.search(r"\b(approve|approved|approval)\b", low):
+            vote = "approve"
+        else:
+            # No explicit signal → abstain (never invent a veto from silence)
+            vote = "abstain"
+        return {
+            "vote": vote,
+            "decision": "approved" if vote == "approve" else vote,
+            "reason": raw[:300],
+        }
 
     def _build_prompt(self, question: str) -> str:
         raise NotImplementedError
@@ -127,7 +164,25 @@ class BoardAgent:
 
 class ChairmanAgent(BoardAgent):
     """Chairman — tiebreaker, orchestrates board votes."""
-    
+
+    def tiebreak(self, votes: Dict[str, str]) -> BoardDecision:
+        """Deterministic tiebreak: majority approve wins; ties approve with
+        quorum >= 2 else reject. Mirrors board aggregation rules."""
+        approves = sum(1 for v in votes.values() if v == "approve")
+        rejects = sum(1 for v in votes.values() if v == "reject")
+        if approves > rejects:
+            final = "approved"
+        elif rejects > approves:
+            final = "rejected"
+        else:
+            final = "approved" if approves >= 2 else "rejected"
+        return BoardDecision(
+            question="(tiebreak)", votes=dict(votes),
+            vetoed_by=None, veto_reason=None,
+            final_decision=final,
+            reasoning={"chairman": "tiebreak applied"},
+        )
+
     def _build_prompt(self, question: str) -> str:
         return f"""You are the Chairman of the Board. Your role is to:
 1. Synthesize arguments from other advisors
@@ -154,7 +209,31 @@ Provide strategic analysis and recommendation."""
 
 class EthicsAdvisor(BoardAgent):
     """Ethics Advisor — ABSOLUTE VETO on PII/harm/illegal content."""
-    
+
+    # Deterministic ethical tripwires (category -> regex)
+    _ETHICS_PATTERNS = {
+        "ssn": r"\b\d{3}-\d{2}-\d{4}\b",
+        "credit_card": r"\b(?:\d[ -]?){13,16}\b",
+        "credit_card_intent": r"\b(?:store|save|process|collect|handle|harvest)\s+"
+                              r"(?:this\s+|the\s+|user\s+|my\s+)*(?:customer\s+)?"
+                              r"(?:credit|debit)\s+card",
+        "password": r"\b(password|passwd|pwd)\s*(leak|exposed|breach|dump)",
+        "self_harm": r"\b(self[- ]?harm|suicide|self[- ]injur)",
+    }
+
+    def check_veto(self, text: str) -> Optional[Dict[str, Any]]:
+        """Deterministic ethics gate. Returns veto dict or None if safe."""
+        import re as _re
+        low = (text or "").lower()
+        for category, pattern in self._ETHICS_PATTERNS.items():
+            if _re.search(pattern, low):
+                return {
+                    "vetoed_by": "ethics_advisor",
+                    "veto_category": category,
+                    "reason": f"Ethical violation detected: {category}",
+                }
+        return None
+
     def _build_prompt(self, question: str) -> str:
         return f"""You are the Ethics Advisor. Your role is to:
 1. VETO any decision involving PII exposure, harm, or illegal content
@@ -203,66 +282,132 @@ class Board:
         model_registry: EnterpriseModelRegistry,
         safety_filter: InlineSafetyFilter,
     ):
-        self.chain = FallbackChain()
+        
         self.model_registry = model_registry
         self.safety_filter = safety_filter
         self._lazy = LazyImports()
         
         # Initialize agents
-        self.chairman = ChairmanAgent(
-            "chairman", FallbackChain(), model_registry, safety_filter
-        )
-        self.strategy_advisor = StrategyAdvisor(
-            "strategy", FallbackChain(), model_registry, safety_filter
-        )
-        self.ethics_advisor = EthicsAdvisor(
-            "ethics", FallbackChain(), model_registry, safety_filter
-        )
-        self.risk_advisor = RiskAdvisor(
-            "risk", FallbackChain(), model_registry, safety_filter
-        )
-        self.user_advisor = UserAdvisor(
-            "user", FallbackChain(), model_registry, safety_filter
-        )
+        # Role names MUST match EnterpriseModelRegistry chain roles exactly.
+        self.chairman = ChairmanAgent("chairman", model_registry, safety_filter)
+        self.strategy_advisor = StrategyAdvisor("strategy_advisor", model_registry, safety_filter)
+        self.ethics_advisor = EthicsAdvisor("ethics_advisor", model_registry, safety_filter)
+        self.risk_advisor = RiskAdvisor("risk_advisor", model_registry, safety_filter)
+        self.user_advisor = UserAdvisor("user_advisor", model_registry, safety_filter)
+
+    @property
+    def ethics(self) -> EthicsAdvisor:
+        """Backward-compatible alias for the ethics advisor."""
+        return self.ethics_advisor
+
+    @property
+    def strategy(self) -> StrategyAdvisor:
+        return self.strategy_advisor
+
+    @property
+    def risk(self) -> RiskAdvisor:
+        return self.risk_advisor
+
+    @property
+    def user(self) -> UserAdvisor:
+        return self.user_advisor
+
+    def run_agent(self, role: str, question: str) -> Dict[str, Any]:
+        """Run a single advisor by full registry role name."""
+        import asyncio as _aio
+        agents = {
+            "chairman": self.chairman,
+            "strategy_advisor": self.strategy_advisor,
+            "ethics_advisor": self.ethics_advisor,
+            "risk_advisor": self.risk_advisor,
+            "user_advisor": self.user_advisor,
+        }
+        agent = agents.get(role)
+        if agent is None:
+            return {"role": role, "error": f"unknown board role: {role}"}
+        try:
+            result = _aio.run(agent.deliberate(question))
+        except RuntimeError:
+            result = _aio.get_event_loop().run_until_complete(agent.deliberate(question))                 if False else None
+            if result is None:
+                raise
+        result["role"] = role
+        return result
 
     def _get_authorization_context(self):
         return self._lazy.get_authorization_context()
 
-    async def deliberate(
+    def deliberate(
+        self,
+        question: str,
+        context: str = "",
+        bypass_safety: bool = False,
+        authorization_context: Optional[Any] = None,
+    ):
+        """Run board deliberation. Sync-friendly: returns BoardDecision
+        directly when no event loop is running; otherwise a coroutine."""
+        import asyncio as _aio
+        try:
+            _aio.get_running_loop()
+        except RuntimeError:
+            return _aio.run(self._deliberate_async(question, context,
+                                                   bypass_safety, authorization_context))
+        return self._deliberate_async(question, context,
+                                      bypass_safety, authorization_context)
+
+    async def _deliberate_async(
         self,
         question: str,
         context: str = "",
         bypass_safety: bool = False,
         authorization_context: Optional[Any] = None,
     ) -> Any:
-        """Run board deliberation with VETO logic."""
+        """Async implementation of board deliberation with VETO logic."""
         # Check authorization if provided
         auth_context = self._lazy.get_authorization_context()
         if authorization_context:
             auth_context = authorization_context
-        
+
+        # Deterministic ethics gate FIRST so PII/harm vetoes are attributed
+        # to ethics_advisor rather than the generic content-safety filter.
+        ethics_veto_early = self.ethics_advisor.check_veto(question)
+        if ethics_veto_early:
+            return BoardDecision(
+                question=question,
+                votes={},
+                vetoed_by=ethics_veto_early["vetoed_by"],
+                veto_reason=ethics_veto_early["reason"],
+                final_decision="vetoed",
+                reasoning={"ethics": ethics_veto_early},
+            )
+
         # Run safety check if not bypassed
         if not bypass_safety:
-            from swarm.enterprise.core.safety_filter import InlineSafetyFilter
+            from swarm.enterprise.core.safety_filter import (
+                InlineSafetyFilter,
+                SafetyViolation,
+            )
             safety_filter = InlineSafetyFilter()
-            report = safety_filter.check(question)
-            if report.verdict in ("unsafe", "critical"):
-                return type('BoardDecision', (), {
-                    'final_decision': 'vetoed',
-                    'vetoed_by': 'safety_filter',
-                    'veto_reason': report.explanation,
-                    'votes': {},
-                    'reasoning': {},
-                })()
+            try:
+                safety_filter.check_input(question, agent_role="board")
+            except SafetyViolation as sv:
+                return BoardDecision(
+                    question=question,
+                    final_decision='vetoed',
+                    vetoed_by=f"safety_filter/{sv.stage}",
+                    veto_reason=sv.message,
+                    votes={},
+                    reasoning={},
+                )
 
-        # Get deliberations from all advisors
+        # Get deliberations from all advisors (keys = registry role names)
         deliberations = {}
         for role, agent in [
             ("chairman", self.chairman),
-            ("strategy", self.strategy_advisor),
-            ("ethics", self.ethics_advisor),
-            ("risk", self.risk_advisor),
-            ("user", self.user_advisor),
+            ("strategy_advisor", self.strategy_advisor),
+            ("ethics_advisor", self.ethics_advisor),
+            ("risk_advisor", self.risk_advisor),
+            ("user_advisor", self.user_advisor),
         ]:
             try:
                 result = await agent.deliberate(f"Question: {question}\nContext: {context}")
@@ -279,17 +424,18 @@ class Board:
             elif hasattr(deliberation, "vote"):
                 votes[role] = deliberation.vote
 
-        # Check for ethics veto
-        if "ethics" in deliberations:
-            ethics_delib = deliberations["ethics"]
+        # Check for ethics veto from LLM deliberation as well
+        if "ethics_advisor" in deliberations:
+            ethics_delib = deliberations["ethics_advisor"]
             if isinstance(ethics_delib, dict) and ethics_delib.get("vote") == "veto":
-                return type('BoardDecision', (), {
-                    'final_decision': 'vetoed',
-                    'vetoed_by': 'ethics_advisor',
-                    'veto_reason': ethics_delib.get('reason', 'Ethical violation'),
-                    'votes': votes,
-                    'reasoning': deliberations,
-                })()
+                return BoardDecision(
+                    question=question,
+                    final_decision='vetoed',
+                    vetoed_by='ethics_advisor',
+                    veto_reason=ethics_delib.get('reason', 'Ethical violation'),
+                    votes=votes,
+                    reasoning=deliberations,
+                )
 
         # Chairman decides
         chairman_delib = deliberations.get("chairman", {})
@@ -297,16 +443,24 @@ class Board:
         if final_decision not in ("approved", "rejected"):
             final_decision = "approved" if sum(1 for v in votes.values() if v == "approve") >= 3 else "rejected"
 
-        return type('BoardDecision', (), {
-            'final_decision': final_decision,
-            'vetoed_by': None,
-            'veto_reason': None,
-            'votes': votes,
-            'reasoning': deliberations,
-        })()
+        return BoardDecision(
+            question=question,
+            final_decision=final_decision,
+            vetoed_by=None,
+            veto_reason=None,
+            votes=votes,
+            reasoning=deliberations,
+        )
 
 
 def create_board() -> Any:
-    """Create a Board instance."""
-    # This would need proper initialization
-    return None
+    """Create a Board instance wired to the enterprise model registry and safety filter."""
+    from swarm.enterprise.core.safety_filter import InlineSafetyFilter
+
+    safety_filter = InlineSafetyFilter()
+    model_registry = EnterpriseModelRegistry()
+    return Board(model_registry, safety_filter)
+
+
+# Backward-compat alias used by tests and legacy callers
+BoardOrchestrator = Board
